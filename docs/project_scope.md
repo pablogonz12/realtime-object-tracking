@@ -1,4 +1,4 @@
-# Project Scope: Real-time Object Detection & Segmentation System
+# Project Scope: Real-time Object Detection & Segmentation System (Updated)
 
 ## Overview
 
@@ -24,26 +24,26 @@ After evaluating multiple implementation strategies, we have selected a **Python
 
 We will implement and compare these three state-of-the-art approaches:
 
-### YOLOv8
+### YOLOv12
 
-Ultralytics' latest iteration offering real-time object detection and instance segmentation with excellent speed-accuracy balance
+Ultralytics' cutting-edge iteration offering real-time object detection and instance segmentation with improved accuracy and speed
 
--   **Strengths**: Fast inference speeds, good accuracy, built-in segmentation capabilities
--   **Implementation**: Official Ultralytics Python package
+-   **Strengths**: Enhanced inference speeds, superior accuracy over previous versions, advanced segmentation capabilities
+-   **Implementation**: Ultralytics Python package (latest version)
 
-### Mask R-CNN
+### RT-DETR (Real-Time Detection Transformer)
 
-Two-stage detector with instance segmentation capabilities
+Transformer-based detector offering excellent accuracy with real-time performance
 
--   **Strengths**: High-quality segmentation masks, strong detection accuracy
--   **Implementation**: Detectron2 framework from Facebook AI Research (Python)
+-   **Strengths**: Transformer architecture benefits, better handling of small objects, competitive speed-accuracy tradeoff
+-   **Implementation**: Official implementation (Python)
 
-### Segment Anything Model (SAM)
+### Segment Anything Model 2 (SAM2)
 
-Meta AI's foundation model for image segmentation
+Meta AI's updated foundation model for image segmentation
 
--   **Strengths**: Zero-shot segmentation capabilities, high-quality masks
--   **Implementation**: Meta's official SAM implementation (Python)
+-   **Strengths**: Enhanced zero-shot segmentation capabilities, improved memory mechanism, better occlusion handling
+-   **Implementation**: Latest SAM2 implementation (Python)
 
 ## Dataset Selection
 
@@ -59,7 +59,7 @@ We will use the COCO (Common Objects in Context) dataset for evaluation as it:
 ### Phase 1: Python Components Development
 
 -   Set up Python environment with PyTorch and required ML frameworks
--   Implement all three model approaches (YOLOv8, Mask R-CNN, SAM)
+-   Implement all three model approaches (YOLOv12, RT-DETR, SAM2)
 -   Create unified inference pipeline for processing video frames
 -   Implement evaluation metrics (mAP, IoU, FPS)
 -   Establish Python API endpoints for Rust integration
