@@ -24,18 +24,26 @@ After evaluating multiple implementation strategies, we have selected a **Python
 
 We will implement and compare these three state-of-the-art approaches:
 
--   **YOLOv8** - Ultralytics' latest iteration offering real-time object detection and instance segmentation with excellent speed-accuracy balance
+### YOLOv8
 
-    -   **Strengths**: Fast inference speeds, good accuracy, built-in segmentation capabilities
-    -   **Implementation**: Official Ultralytics Python package
--   **Mask R-CNN** - Two-stage detector with instance segmentation capabilities
+Ultralytics' latest iteration offering real-time object detection and instance segmentation with excellent speed-accuracy balance
 
-    -   **Strengths**: High-quality segmentation masks, strong detection accuracy
-    -   **Implementation**: Detectron2 framework from Facebook AI Research (Python)
--   **Segment Anything Model (SAM)** - Meta AI's foundation model for image segmentation
+-   **Strengths**: Fast inference speeds, good accuracy, built-in segmentation capabilities
+-   **Implementation**: Official Ultralytics Python package
 
-    -   **Strengths**: Zero-shot segmentation capabilities, high-quality masks
-    -   **Implementation**: Meta's official SAM implementation (Python)
+### Mask R-CNN
+
+Two-stage detector with instance segmentation capabilities
+
+-   **Strengths**: High-quality segmentation masks, strong detection accuracy
+-   **Implementation**: Detectron2 framework from Facebook AI Research (Python)
+
+### Segment Anything Model (SAM)
+
+Meta AI's foundation model for image segmentation
+
+-   **Strengths**: Zero-shot segmentation capabilities, high-quality masks
+-   **Implementation**: Meta's official SAM implementation (Python)
 
 ## Dataset Selection
 
@@ -55,6 +63,7 @@ We will use the COCO (Common Objects in Context) dataset for evaluation as it:
 -   Create unified inference pipeline for processing video frames
 -   Implement evaluation metrics (mAP, IoU, FPS)
 -   Establish Python API endpoints for Rust integration
+
 
 ### Phase 2: Rust Application Development
 
