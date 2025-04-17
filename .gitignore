@@ -31,6 +31,8 @@ Cargo.lock
 *.onnx
 *.bin
 *.weights
+models/pts/
+models/pts/*.pth
 
 # Large datasets
 data_sets/image_data/*

@@ -1,0 +1,18 @@
+# Core ML Framework
+torch
+torchvision
+torchaudio
+
+# YOLO / Ultralytics
+ultralytics
+
+# OpenCV for image/video processing
+opencv-python
+
+# PyO3 for Rust integration
+pyo3
+
+# Add other dependencies as needed for RT-DETR, SAM2, etc.
+numpy
+Pillow
+segment-anything

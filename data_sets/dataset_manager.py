@@ -9,15 +9,16 @@ import argparse
 from pathlib import Path
 from tqdm import tqdm
 
+# Version identifier to verify we're running the correct file
+VERSION = "1.2.0"  # Unified download command
+
 class DatasetManager:
-    """Smart manager for COCO dataset and video samples"""
+    """Smart manager for COCO dataset"""
     
     def __init__(self):
         self.base_dir = Path(__file__).parent
         self.image_dir = self.base_dir / "image_data"
-        self.video_dir = self.base_dir / "video_data"
         self.coco_dir = self.image_dir / "coco"
-        self.samples_dir = self.video_dir / "samples"
         
     def download_file(self, url, destination, headers=None):
         """Download file with progress bar"""
@@ -156,151 +157,145 @@ class DatasetManager:
         os.remove(ann_path)
         
         print(f"COCO dataset ready at {self.coco_dir}")
-        
-    def setup_video_samples(self):
-        """Download sample videos for testing"""
-        self.samples_dir.mkdir(parents=True, exist_ok=True)
-        
-def setup_video_samples(self):
-    """Download sample videos for testing"""
-    self.samples_dir.mkdir(parents=True, exist_ok=True)
-    
-    # List of videos with reliable direct download links
-    videos = [
-        # Video 1: Sample MP4 from GitHub (very reliable)
-        {
-            "url": "https://github.com/bower-media-samples/big-buck-bunny-1080p-60fps-30s/raw/master/video.mp4",
-            "name": "big_buck_bunny.mp4"
-        },
-        # Video 2: Sample video of traffic from GitHub (reliable)
-        {
-            "url": "https://github.com/intel-iot-devkit/sample-videos/raw/master/car-detection.mp4",
-            "name": "car_detection.mp4"
-        },
-        # Video 3: Sample video of people walking from GitHub (reliable)
-        {
-            "url": "https://github.com/intel-iot-devkit/sample-videos/raw/master/person-bicycle-car-detection.mp4",
-            "name": "person_bicycle_car.mp4"
-        },
-        # Video 4: Wildlife video sample (medium-sized file)
-        {
-            "url": "https://vjs.zencdn.net/v/oceans.mp4",
-            "name": "oceans.mp4" 
-        }
-    ]
-    
-    # Download each video
-    for video in videos:
-        video_path = self.samples_dir / video["name"]
-        if not video_path.exists():
-            print(f"Downloading {video['name']}...")
-            success = self.download_file(video["url"], video_path)
-            if not success:
-                print(f"Failed to download {video['name']}, please download manually.")
-                # Create a text file with instructions
-                with open(self.samples_dir / f"{video['name']}.txt", 'w') as f:
-                    f.write(f"Please download a sample video and rename it to {video['name']}\n")
-                    f.write("You can find free videos at:\n")
-                    f.write("1. https://www.pexels.com/videos/\n")
-                    f.write("2. https://pixabay.com/videos/\n")
-                    f.write("3. https://www.videvo.net/free-stock-videos/")
-            else:
-                print(f"Successfully downloaded {video['name']}")
-        else:
-            print(f"{video['name']} already exists.")
-            
-    print(f"Sample videos ready at {self.samples_dir}")
 
     def compress_datasets(self):
         """Compress datasets to save space"""
+        # Compress val2017 images
         if (self.coco_dir / "val2017").exists():
             print("Compressing COCO validation images...")
             with zipfile.ZipFile(self.coco_dir / "val2017_compressed.zip", 'w', 
                                 zipfile.ZIP_DEFLATED) as zipf:
                 for root, _, files in os.walk(self.coco_dir / "val2017"):
                     for file in tqdm(files):
-                        zipf.write(
-                            os.path.join(root, file),
-                            os.path.relpath(os.path.join(root, file), 
-                                           os.path.join(self.coco_dir, '..'))
-                        )
+                        file_path = os.path.join(root, file)
+                        arc_name = os.path.relpath(file_path, self.image_dir)
+                        zipf.write(file_path, arc_name)
             
             shutil.rmtree(self.coco_dir / "val2017")
-            print("COCO dataset compressed. Use decompress command to restore.")
-    
+            print("COCO images compressed.")
+        
+        # Optimize annotation compression by reducing redundant operations
+        annotations_dir = self.coco_dir / "annotations"
+        if annotations_dir.exists():
+            print("Compressing COCO annotations...")
+            try:
+                zip_path = self.coco_dir / "annotations_compressed.zip"
+                with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+                    for dirpath, _, filenames in os.walk(annotations_dir):
+                        for filename in tqdm(filenames, desc="Compressing annotation files"):
+                            filepath = os.path.join(dirpath, filename)
+                            arcname = os.path.relpath(filepath, annotations_dir)
+                            zipf.write(filepath, arcname)
+                
+                if zip_path.exists() and zip_path.stat().st_size > 0:
+                    print(f"Successfully compressed annotations to {zip_path}")
+                    shutil.rmtree(annotations_dir)
+                    print("Original annotations directory removed")
+                else:
+                    print("Error: Zip file was not created successfully")
+            except Exception as e:
+                print(f"Error compressing annotations: {e}")
+                return
+        print("Compression complete. Use decompress command to restore.")
+
     def decompress_datasets(self):
         """Decompress datasets for use"""
-        compressed_file = self.coco_dir / "val2017_compressed.zip"
-        if compressed_file.exists():
+        # Optimize decompression by checking file existence before extraction
+        img_compressed_file = self.coco_dir / "val2017_compressed.zip"
+        if img_compressed_file.exists():
             print("Decompressing COCO validation images...")
-            with zipfile.ZipFile(compressed_file, 'r') as zip_ref:
+            with zipfile.ZipFile(img_compressed_file, 'r') as zip_ref:
+                zip_ref.extractall(self.coco_dir / "val2017")
+            print("COCO images decompressed.")
+            img_compressed_file.unlink()
+            print("Removed compressed image file.")
+        
+        # Decompress annotations
+        ann_compressed_file = self.coco_dir / "annotations_compressed.zip"
+        if ann_compressed_file.exists():
+            print("Decompressing COCO annotations...")
+            with zipfile.ZipFile(ann_compressed_file, 'r') as zip_ref:
                 zip_ref.extractall(self.coco_dir / "..")
-            print("COCO dataset decompressed and ready for use.")
-    
+            print("COCO annotations decompressed.")
+            # Delete the compressed file after decompression
+            os.remove(ann_compressed_file)
+            print("Removed compressed annotation file.")
+            
+        print("Decompression complete. Datasets ready for use.")
+
     def delete_datasets(self):
         """Delete all downloaded datasets"""
-        compressed_file = self.coco_dir / "val2017_compressed.zip"
-        if compressed_file.exists():
-            os.remove(compressed_file)
+        # Remove compressed files
+        img_compressed_file = self.coco_dir / "val2017_compressed.zip"
+        if img_compressed_file.exists():
+            os.remove(img_compressed_file)
             
+        ann_compressed_file = self.coco_dir / "annotations_compressed.zip"
+        if ann_compressed_file.exists():
+            os.remove(ann_compressed_file)
+            
+        # Remove dataset directories
         if self.image_dir.exists():
             shutil.rmtree(self.image_dir)
-            print("Deleted image dataset.")
+            print("Deleted image dataset including any compressed files.")
         else:
             print("Image dataset not found.")
-            
-        if self.video_dir.exists():
-            shutil.rmtree(self.video_dir)
-            print("Deleted video dataset.")
-        else:
-            print("Video dataset not found.")
 
 def main():
-    parser = argparse.ArgumentParser(description='Dataset Manager for Computer Vision Project')
-    subparsers = parser.add_subparsers(dest='command', help='Command to execute')
+    # Print version to confirm we're running the right script
+    print(f"Dataset Manager version {VERSION}")
     
-    # Download COCO dataset
-    coco_parser = subparsers.add_parser('coco', help='Download COCO dataset')
-    coco_parser.add_argument('--subset', type=int, help='Create a subset with specified number of images')
-    
-    # Download video samples
-    subparsers.add_parser('videos', help='Download sample videos')
-    
-    # Download all datasets
-    all_parser = subparsers.add_parser('all', help='Download all datasets')
-    all_parser.add_argument('--subset', type=int, help='Create a subset with specified number of images')
-    
-    # Compress datasets
-    subparsers.add_parser('compress', help='Compress datasets to save space')
-    
-    # Decompress datasets
-    subparsers.add_parser('decompress', help='Decompress datasets for use')
-    
-    # Delete all datasets
-    subparsers.add_parser('delete', help='Delete all downloaded datasets')
-    
-    args = parser.parse_args()
-    if not args.command:
-        parser.print_help()
-        sys.exit(1)
     manager = DatasetManager()
     
-    if args.command == 'coco':
-        manager.setup_coco(args.subset)
-    elif args.command == 'videos':
-        manager.setup_video_samples()
-    elif args.command == 'all':
-        subset = getattr(args, 'subset', None)
-        manager.setup_coco(subset)
-        manager.setup_video_samples()
-    elif args.command == 'compress':
-        manager.compress_datasets()
-    elif args.command == 'decompress':
-        manager.decompress_datasets()
-    elif args.command == 'delete':
-        manager.delete_datasets()
-    else:
-        parser.print_help()
+    while True:
+        # Display options menu
+        print("\nWhat would you like to do?")
+        print("1. Download full COCO dataset (all)")
+        print("2. Download subset of COCO dataset (subset)")
+        print("3. Compress datasets to save space (compress)")
+        print("4. Decompress datasets for use (decompress)")
+        print("5. Delete all downloaded datasets (delete)")
+        print("6. Exit")
+        
+        # Get user input
+        choice = input("\nEnter command or number: ").strip().lower()
+        
+        # Process user choice
+        if choice in ('1', 'all'):
+            manager.setup_coco(None)  # Full dataset
+            break
+        elif choice in ('2', 'subset'):
+            try:
+                size = int(input("Enter number of images for subset: ").strip())
+                if size <= 0:
+                    print("Error: Number of images must be positive.")
+                    continue
+                manager.setup_coco(size)  # Subset of dataset
+                break
+            except ValueError:
+                print("Error: Please enter a valid number.")
+                continue
+        elif choice in ('3', 'compress'):
+            manager.compress_datasets()
+            break
+        elif choice in ('4', 'decompress'):
+            manager.decompress_datasets()
+            break
+        elif choice in ('5', 'delete'):
+            confirm = input("Are you sure you want to delete all datasets? (yes/no): ").strip().lower()
+            if confirm in ('yes', 'y'):
+                manager.delete_datasets()
+                break
+            else:
+                print("Deletion cancelled.")
+                continue
+        elif choice in ('6', 'exit', 'quit'):
+            print("Exiting dataset manager.")
+            break
+        else:
+            print(f"Invalid choice: '{choice}'. Please try again.")
+
+    print("\nDataset manager operation completed.")
 
 if __name__ == "__main__":
     main()
