@@ -14,13 +14,18 @@ import sys
 import curses
 import time  # Import time module for FPS control and timing
 from pathlib import Path
+
+# Add project root to PYTHONPATH so sibling packages (data_sets, inference) are importable
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
 import traceback  # Import traceback for detailed error logging
 import threading  # Import threading for video preview
 from PIL import Image, ImageTk  # Import PIL for image processing
 from ttkthemes import ThemedTk # Import ThemedTk
-
-# Add the project root to the path for imports
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent)) # Use resolve() for robustness
+import tkinter.simpledialog as simpledialog  # for input dialogs
+from data_sets.dataset_manager import DatasetManager
+from inference.evaluate_models import ModelEvaluator, COCO_VAL_TOTAL_IMAGES
+import pandas as pd # Import pandas for displaying results table
 
 # Import model wrappers directly from consolidated models file
 from models.models import ModelManager # Removed unused YOLOWrapper, RTDETRWrapper, SAMWrapper imports
@@ -301,11 +306,128 @@ class GraphicalGUI:
         self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
         
         self.setup_ui()
-        # Removed self.apply_theme() call
+        self.init_menu()  # Add menu bar after UI setup
 
-    # Removed toggle_theme method
-    # Removed apply_theme method
-    # Removed _configure_widget method
+    def init_menu(self):
+        """Initialize the menu bar with Dataset and Evaluate options"""
+        menubar = tk.Menu(self.root)
+        # Dataset menu
+        dataset_menu = tk.Menu(menubar, tearoff=0)
+        dataset_menu.add_command(label="Download Full COCO", command=self.download_coco_full)
+        dataset_menu.add_command(label="Download COCO Subset...", command=self.download_coco_subset)
+        dataset_menu.add_separator()
+        dataset_menu.add_command(label="Decompress Datasets", command=self.decompress_datasets)
+        dataset_menu.add_command(label="Compress Datasets", command=self.compress_datasets)
+        dataset_menu.add_separator()
+        dataset_menu.add_command(label="Delete All Datasets", command=self.delete_datasets_gui)
+        menubar.add_cascade(label="Dataset", menu=dataset_menu)
+        # Evaluation menu
+        eval_menu = tk.Menu(menubar, tearoff=0)
+        eval_menu.add_command(label="Run Evaluation...", command=self.run_evaluation_gui)
+        menubar.add_cascade(label="Evaluate", menu=eval_menu)
+        # Attach to root
+        self.root.config(menu=menubar)
+
+    def download_coco_full(self):
+        """Download the full COCO val2017 dataset"""
+        dm = DatasetManager()
+        self.status_var.set("Downloading full COCO dataset...")
+        self.root.update()
+        dm.setup_coco(None)
+        messagebox.showinfo("Dataset Manager", "Full COCO dataset download and setup complete.")
+        self.status_var.set("Ready")
+
+    def download_coco_subset(self):
+        """Prompt for subset size and download COCO subset"""
+        size = simpledialog.askinteger("COCO Subset", "Enter number of images for subset:", minvalue=1)
+        if size:
+            dm = DatasetManager()
+            self.status_var.set(f"Downloading COCO subset ({size} images)...")
+            self.root.update()
+            dm.setup_coco(size)
+            messagebox.showinfo("Dataset Manager", f"COCO subset of {size} images ready.")
+            self.status_var.set("Ready")
+
+    def delete_datasets_gui(self):
+        """Confirm and delete all datasets via DatasetManager"""
+        if messagebox.askyesno("Delete Datasets", "Are you sure you want to delete all image datasets? This cannot be undone."):
+            dm = DatasetManager()
+            dm.delete_datasets()
+            messagebox.showinfo("Dataset Manager", "All datasets deleted.")
+            self.status_var.set("Ready")
+
+    def run_evaluation_gui(self):
+        """Prompt for evaluation parameters and run evaluation in background"""
+        # Ask for number of images
+        num = simpledialog.askinteger("Run Evaluation", f"Number of images (1-{COCO_VAL_TOTAL_IMAGES}):", minvalue=1, maxvalue=COCO_VAL_TOTAL_IMAGES)
+        if not num:
+            return
+        no_vis = messagebox.askyesno("Visualizations", "Skip saving visualizations? (Yes to skip)")
+        
+        # Run evaluation in a thread
+        def eval_task():
+            self.status_var.set(f"Evaluating models on {num} images...")
+            self.root.update() # Update status immediately
+            
+            # --- Progress Callback Definition ---
+            def update_progress_display(model_type, current_image, total_images):
+                """Callback function to update the preview canvas during evaluation."""
+                progress_percent = (current_image / total_images) * 100 if total_images > 0 else 0
+                message = (
+                    f"Evaluating: {model_type.upper()}\n"
+                    f"Image {current_image} of {total_images}\n"
+                    f"Progress: {progress_percent:.1f}%"
+                )
+                # Use root.after to ensure GUI update happens in the main thread
+                self.root.after(0, self.show_preview_message, message)
+            # --- End Progress Callback Definition ---
+
+            # Initial message before starting
+            self.show_preview_message(f"Starting evaluation on {num} images...")
+            
+            evaluator = ModelEvaluator()
+            try:
+                # Pass the callback function to run_evaluation
+                evaluator.run_evaluation(
+                    max_images=num, 
+                    save_visualizations=not no_vis, 
+                    progress_callback=update_progress_display 
+                )
+                results = evaluator.results # Capture results
+                
+                # Display final results in the GUI
+                self.root.after(0, self.show_evaluation_results, results)
+                
+                messagebox.showinfo("Evaluation Complete", 
+                                    "Model evaluation finished.\nResults are displayed in the preview panel.\n"
+                                    "Detailed reports and charts saved in the 'inference/results' folder.")
+            except Exception as e:
+                print(f"Error during evaluation: {e}")
+                traceback.print_exc()
+                messagebox.showerror("Evaluation Error", f"An error occurred during evaluation:\n{e}")
+                self.show_preview_message(f"Evaluation failed.\nError: {e}") # Show error in preview
+            finally:
+                self.status_var.set("Ready") # Reset status bar
+                
+        threading.Thread(target=eval_task, daemon=True).start()
+
+    def decompress_datasets(self):
+        """Decompress datasets for use"""
+        dm = DatasetManager()
+        self.status_var.set("Decompressing datasets...")
+        self.root.update()
+        dm.decompress_datasets()
+        messagebox.showinfo("Dataset Manager", "Datasets decompressed successfully.")
+        self.status_var.set("Ready")
+
+    def compress_datasets(self):
+        """Compress datasets to save space"""
+        dm = DatasetManager()
+        self.status_var.set("Compressing datasets...")
+        self.root.update()
+        dm.compress_datasets()
+        messagebox.showinfo("Dataset Manager", "Datasets compressed successfully.")
+        self.status_var.set("Ready")
 
     def setup_ui(self):
         """Set up the UI components"""
@@ -316,6 +438,7 @@ class GraphicalGUI:
         # Left panel for controls
         left_frame = ttk.Frame(main_paned)
         main_paned.add(left_frame, weight=1)
+        self.left_frame = left_frame  # Store reference for button updates
         
         # Right panel for video preview
         right_frame = ttk.Frame(main_paned)
@@ -464,20 +587,20 @@ class GraphicalGUI:
         # Run button
         run_frame = ttk.Frame(left_frame)
         run_frame.pack(fill=tk.X, padx=5, pady=10)
+        self.run_frame = run_frame # Store reference to the frame
         
-        run_button = ttk.Button(run_frame, text="Run Model", command=self.run_model, width=15)
-        run_button.pack(side=tk.RIGHT, padx=5)
+        self.run_button = ttk.Button(run_frame, text="Run Model", command=self.run_model, width=15)
+        self.run_button.pack(side=tk.RIGHT, padx=5)
 
-        # Pause and Stop buttons (initially hidden)
+        # Pause and Stop buttons (initially hidden, packed in run_frame)
         self.pause_button = ttk.Button(run_frame, text="Pause", command=self.pause_processing, width=10)
         self.stop_button = ttk.Button(run_frame, text="Stop", command=self.stop_processing, width=10)
+        # Don't pack pause/stop initially, _update_buttons will handle it
 
         # Add webcam button
-        self.add_webcam_button()
+        self.add_webcam_button(left_frame) # Pass parent frame
 
         # Removed Dark mode toggle
-        # dark_mode_toggle = ttk.Checkbutton(run_frame, text="Dark Mode", variable=self.is_dark_mode, command=self.toggle_theme)
-        # dark_mode_toggle.pack(side=tk.LEFT, padx=5)
 
         # --- Right panel content (video preview) ---
         preview_container = ttk.LabelFrame(right_frame, text="Video Preview")
@@ -622,10 +745,9 @@ class GraphicalGUI:
             self.status_var.set(f"Running {model_type} on {os.path.basename(video_path)}...")
             self.processing_active = True
             
-            # Find and hide run button, show pause and stop buttons
-            for widget in self.root.winfo_children():
-                self._update_buttons_in_widget(widget, True)
-                
+            # Update button states
+            self._update_buttons(True)
+            
             # Process the video in the preview panel
             self.process_video_with_model(video_path, model_manager)
 
@@ -636,8 +758,7 @@ class GraphicalGUI:
             # Reset processing state
             self.processing_active = False
             # Restore button state
-            for widget in self.root.winfo_children():
-                self._update_buttons_in_widget(widget, False)
+            self._update_buttons(False)
 
     def get_selected_video_path(self):
         """Get the selected video path based on the active tab and selection"""
@@ -1074,20 +1195,30 @@ class GraphicalGUI:
             fps = cap.get(cv2.CAP_PROP_FPS)
             total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
             
-            # Limit the refresh rate to make UI responsive while processing
-            target_fps = min(30, fps)
-            frame_interval_ms = int(1000 / target_fps)
+            # --- Performance Optimizations ---
+            # 1. Frame Skipping: Process every Nth frame
+            frame_skip = 2 # Process every 2nd frame (adjust as needed)
             
-            # Store canvas dimensions for resizing frames
+            # 2. Processing Resolution: Resize before inference
+            process_width = 640 # Standard processing width
+            process_height = 480 # Standard processing height
+            
+            # 3. UI Update Rate Limit
+            target_display_fps = min(15, fps / frame_skip) # Limit display FPS
+            frame_interval_ms = int(1000 / target_display_fps) if target_display_fps > 0 else 100 # Min 100ms interval
+            # --- End Optimizations ---
+
+            # Store canvas dimensions for resizing display frames
             canvas_width = self.preview_canvas.winfo_width() or 400  
             canvas_height = self.preview_canvas.winfo_height() or 300
             
-            # Calculate scaling ratio to fit in the canvas
-            ratio = min(canvas_width / width, canvas_height / height)
-            new_width = int(width * ratio)
-            new_height = int(height * ratio)
+            # Calculate scaling ratio to fit display frame in the canvas
+            display_ratio = min(canvas_width / process_width, canvas_height / process_height)
+            display_width = int(process_width * display_ratio)
+            display_height = int(process_height * display_ratio)
             
-            frame_count = 0
+            frame_index = 0 # Keep track of original frame index
+            processed_frame_count = 0 # Keep track of frames actually processed
             processing_errors = 0
             last_update_time = 0
             
@@ -1104,15 +1235,17 @@ class GraphicalGUI:
             while not self.stop_preview:
                 # Handle pausing
                 if self.pause_processing:
-                    if pause_time == 0:  # Just paused
-                        pause_time = time.time()
-                        self.root.after(0, lambda: self.status_var.set(f"Paused at frame {frame_count}/{total_frames}"))
+                    if pause_time == 0:                        
+                        pause_start_time = time.time() # Record when pause started
+                        self.root.after(0, lambda: self.status_var.set(f"Paused at frame {frame_index}/{total_frames}"))
+                        pause_time = pause_start_time # Set pause_time to non-zero
                     time.sleep(0.1)  # Reduce CPU usage while paused
                     continue
                 elif pause_time > 0:  # Just resumed
                     total_pause_duration += (time.time() - pause_time)
                     pause_time = 0
-                    self.root.after(0, lambda: self.status_var.set(f"Resumed processing at frame {frame_count}/{total_frames}"))
+                    self.root.after(0, lambda count=frame_index, total=total_frames: 
+                                   self.status_var.set(f"Resumed processing at frame {count}/{total}"))
                 
                 # Read frame
                 ret, frame = cap.read()
@@ -1120,73 +1253,65 @@ class GraphicalGUI:
                     print("End of video stream.")
                     break
                 
-                frame_count += 1
+                frame_index += 1
+                
+                # --- Apply Frame Skipping ---
+                if frame_index % frame_skip != 0:
+                    continue # Skip this frame
+                    
+                processed_frame_count += 1
                 current_time = int(time.time() * 1000)
                 
-                # Update status every ~10 frames
-                if frame_count % 10 == 0:
-                    self.root.after(0, lambda count=frame_count, total=total_frames: 
-                                   self.status_var.set(f"Processing frame {count}/{total} with {model_manager.model_type}"))
+                # Update status periodically based on processed frames
+                if processed_frame_count % 5 == 0: # Update status less frequently
+                    self.root.after(0, lambda count=frame_index, total=total_frames: 
+                                   self.status_var.set(f"Processing frame {count}/{total} ({processed_frame_count} processed)"))
                 
                 try:
-                    # Process frame with model
-                    if model_manager.model_type == "sam":
-                        # For SAM, create prompt points
-                        h, w = frame.shape[:2]
-                        grid_size = 3
-                        y_points = np.linspace(h // 4, 3 * h // 4, grid_size, dtype=int)
-                        x_points = np.linspace(w // 4, 3 * w // 4, grid_size, dtype=int)
-                        input_points = np.array([[x, y] for y in y_points for x in x_points])
-                        input_labels = np.ones(len(input_points), dtype=np.int32)
-                        
-                        # Run prediction
-                        results = model_manager.predict(frame, input_points=input_points, input_labels=input_labels)
-                        if results and len(results) == 3:
-                            _, _, annotated_frame = results
-                        else:
-                            annotated_frame = frame.copy()
-                            cv2.putText(annotated_frame, "No SAM results", (30, 30),
-                                       cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
-                    else:
-                        # Standard object detection models (YOLO, RT-DETR, Faster R-CNN)
-                        results = model_manager.predict(frame)
-                        if results and len(results) == 3:
-                            detections, segmentations, annotated_frame = results
-                            
-                            # Count detections by class for statistics
-                            for detection in detections:
-                                if "class_name" in detection:
-                                    class_name = detection["class_name"]
-                                    detection_counts[class_name] = detection_counts.get(class_name, 0) + 1
-                        else:
-                            annotated_frame = frame.copy()
-                            cv2.putText(annotated_frame, "No detection results", (30, 30),
-                                       cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
+                    # --- Resize frame BEFORE processing ---
+                    frame_resized_for_processing = cv2.resize(frame, (process_width, process_height))
                     
-                    # Limit update rate to keep UI responsive
+                    # Process frame with model
+                    # Assuming model_manager methods handle the resized frame
+                    if model_manager.model_type == "sam":
+                        # SAM might need specific handling (e.g., embeddings first)
+                        # This part needs to be adapted based on how SAM is integrated
+                        # For now, assume a generic process_frame method exists
+                        annotated_frame, detections = model_manager.process_frame(frame_resized_for_processing)
+                    else:
+                        # Standard object detection/segmentation
+                        # predict now returns (detections, segmentations, annotated_frame)
+                        detections, segmentations, annotated_frame = model_manager.predict(frame_resized_for_processing) # Pass resized frame
+
+                        # Update detection counts using the returned detections list
+                        for det in detections:
+                            class_name = det.get('class_name', 'Unknown')
+                            if class_name != 'Unknown':
+                                detection_counts[class_name] = detection_counts.get(class_name, 0) + 1
+
+                    # Limit display update rate to keep UI responsive
                     if (current_time - last_update_time) >= frame_interval_ms:
-                        # Convert and resize for display
-                        frame_rgb = cv2.cvtColor(annotated_frame, cv2.COLOR_BGR2RGB)
-                        frame_resized = cv2.resize(frame_rgb, (new_width, new_height))
+                        # Resize the *annotated* frame for display
+                        frame_resized_for_display = cv2.resize(annotated_frame, (display_width, display_height))
+                        frame_rgb = cv2.cvtColor(frame_resized_for_display, cv2.COLOR_BGR2RGB)
                         
                         # Create PhotoImage and update canvas on main thread
-                        pil_img = Image.fromarray(frame_resized)
+                        pil_img = Image.fromarray(frame_rgb)
                         self.root.after(0, self._update_video_canvas, 
-                                       pil_img, frame_count, total_frames, model_manager.model_type)
+                                       pil_img, frame_index, total_frames, model_manager.model_type)
                         
                         # Update timestamp
                         last_update_time = current_time
                         
-                    # Process UI events to keep it responsive
-                    time.sleep(0.001)
+                    # No need for time.sleep(0.001) if UI updates are throttled
                     
                 except Exception as e:
                     processing_errors += 1
-                    print(f"Error processing frame {frame_count}: {e}")
+                    print(f"Error processing frame {frame_index}: {e}")
                     traceback.print_exc()
                     
                     if processing_errors <= 5:  # Limit error messages
-                        error_msg = f"Error processing frame {frame_count}: {str(e)[:50]}"
+                        error_msg = f"Error processing frame {frame_index}: {str(e)[:50]}"
                         self.root.after(0, lambda msg=error_msg: 
                                       messagebox.showwarning("Processing Error", msg))
             
@@ -1196,14 +1321,14 @@ class GraphicalGUI:
             
             # Calculate final statistics
             processing_time = time.time() - start_time - total_pause_duration
-            actual_fps = frame_count / processing_time if processing_time > 0 else 0
+            actual_fps = processed_frame_count / processing_time if processing_time > 0 else 0
             
             # Prepare statistics summary
             stats = {
-                "frames_processed": frame_count,
-                "total_frames": total_frames,
+                "frames_processed": processed_frame_count, # Report processed frames
+                "total_frames": total_frames, # Report total frames in video
                 "processing_time": processing_time,
-                "actual_fps": actual_fps,
+                "actual_fps": actual_fps, # FPS based on processed frames
                 "errors": processing_errors,
                 "detections": detection_counts,
                 "model_type": model_manager.model_type,
@@ -1218,8 +1343,7 @@ class GraphicalGUI:
             self.root.after(0, lambda: setattr(self, 'processing_active', False))
             
             # Reset button states
-            for widget in self.root.winfo_children():
-                self.root.after(0, lambda w=widget: self._update_buttons_in_widget(w, False))
+            self.root.after(0, lambda: self._update_buttons(False))
                 
         except Exception as e:
             print(f"Error in video processing thread: {e}")
@@ -1233,8 +1357,7 @@ class GraphicalGUI:
             self.root.after(0, lambda: setattr(self, 'processing_active', False))
             
             # Reset button states on error
-            for widget in self.root.winfo_children():
-                self.root.after(0, lambda w=widget: self._update_buttons_in_widget(w, False))
+            self.root.after(0, lambda: self._update_buttons(False))
 
     def _update_video_canvas(self, pil_img, frame_count, total_frames, model_type):
         """Update the video canvas with a processed frame from the model (called from main thread)"""
@@ -1286,38 +1409,30 @@ class GraphicalGUI:
         # Reset processing state
         self.processing_active = False
         # Update buttons back to normal
-        for widget in self.root.winfo_children():
-            self._update_buttons_in_widget(widget, False)
+        self._update_buttons(False)
 
-    def _update_buttons_in_widget(self, widget, is_processing):
-        """Update button states in widget tree based on processing state"""
+    def _update_buttons(self, is_processing):
+        """Update button states based on processing state"""
         try:
-            # Find the run frame which contains our buttons
-            if isinstance(widget, ttk.Frame):
-                for child in widget.winfo_children():
-                    if isinstance(child, ttk.Frame):
-                        # Check if this is our run_frame
-                        for button in child.winfo_children():
-                            if isinstance(button, ttk.Button):
-                                if button.cget("text") == "Run Model" and is_processing:
-                                    # Hide run button during processing
-                                    button.pack_forget()
-                                    
-                                    # Show pause/stop buttons
-                                    self.pause_button.pack(side=tk.RIGHT, padx=5)
-                                    self.stop_button.pack(side=tk.RIGHT, padx=5)
-                                elif button.cget("text") == "Run Model" and not is_processing:
-                                    # When processing is done/stopped, show run button again
-                                    button.pack(side=tk.RIGHT, padx=5)
-                                    
-                                    # Hide pause/stop buttons
-                                    if hasattr(self, 'pause_button'):
-                                        self.pause_button.pack_forget()
-                                    if hasattr(self, 'stop_button'):
-                                        self.stop_button.pack_forget()
-                    else:
-                        # Recurse through the widget tree
-                        self._update_buttons_in_widget(child, is_processing)
+            if is_processing:
+                # Hide Run, show Pause/Stop
+                self.run_button.pack_forget()
+                self.pause_button.pack(in_=self.run_frame, side=tk.LEFT, padx=5)
+                self.stop_button.pack(in_=self.run_frame, side=tk.LEFT, padx=5)
+
+                # Disable webcam button during video processing
+                if hasattr(self, 'webcam_button'):
+                    self.webcam_button.config(state=tk.DISABLED)
+            else:
+                # Hide Pause/Stop, show Run
+                self.pause_button.pack_forget()
+                self.stop_button.pack_forget()
+                self.run_button.pack(in_=self.run_frame, side=tk.RIGHT, padx=5)
+
+                # Re-enable webcam button
+                if hasattr(self, 'webcam_button'):
+                    self.webcam_button.config(state=tk.NORMAL)
+
         except Exception as e:
             print(f"Error updating buttons: {e}")
             traceback.print_exc()
@@ -1422,7 +1537,8 @@ class GraphicalGUI:
                 total_detections = sum(count for _, count in sorted_detections)
                 
                 # Display top detections (limit to 10)
-                for i, (class_name, count) in enumerate(sorted_detections[:10]):
+                max_detections_to_show = 5 # Limit display for space
+                for i, (class_name, count) in enumerate(sorted_detections[:max_detections_to_show]):
                     percentage = (count / total_detections * 100) if total_detections > 0 else 0
                     
                     # Use brighter colors suitable for dark background
@@ -1438,17 +1554,18 @@ class GraphicalGUI:
                     )
                     y_pos += 22
                     
-                # If we have more than 10 detection classes, show a summary for the rest
-                if len(sorted_detections) > 10:
-                    remaining = sum(count for _, count in sorted_detections[10:])
+                # If we have more than max_detections_to_show detection classes, show a summary for the rest
+                if len(sorted_detections) > max_detections_to_show:
+                    remaining = sum(count for _, count in sorted_detections[max_detections_to_show:])
                     percentage = (remaining / total_detections * 100) if total_detections > 0 else 0
                     
                     self.preview_canvas.create_text(
                         50, y_pos,
-                        text=f"• Other classes: {remaining} ({percentage:.1f}%)",
+                        text=f"• Other classes ({len(sorted_detections) - max_detections_to_show}): {remaining} ({percentage:.1f}%)",
                         fill="#BBBBBB", font=("Arial", 11), # Lighter gray
                         anchor=tk.W
                     )
+                    y_pos += 22 # Add space after 'Other classes'
             else:
                 y_pos += 20
                 self.preview_canvas.create_text(
@@ -1457,12 +1574,13 @@ class GraphicalGUI:
                     fill="#BBBBBB", font=("Arial", 11), # Lighter gray
                     anchor=tk.CENTER
                 )
+                y_pos += 22 # Add space even if no detections
             
             # Add a footer with prompt to continue (adjust color)
             footer_color = "#77AADD" # Same as header
             self.preview_canvas.create_text(
                 canvas_width // 2, canvas_height - 30,
-                text="Processing complete. Click 'Run Model' to process another video.",
+                text="Processing complete. Select another video or run evaluation.",
                 fill=footer_color, font=("Arial", 10),
                 anchor=tk.CENTER
             )
@@ -1471,6 +1589,125 @@ class GraphicalGUI:
             print(f"Error displaying completion stats: {e}")
             traceback.print_exc()
             self.show_preview_message(f"Error displaying completion statistics:\n{str(e)}")
+
+    def show_evaluation_results(self, results):
+        """Show a summary of model evaluation results on the canvas"""
+        try:
+            # Clear canvas
+            self.preview_canvas.delete("all")
+            
+            if not results:
+                self.show_preview_message("No evaluation results available.")
+                return
+
+            # Calculate canvas dimensions for layout
+            canvas_width = self.preview_canvas.winfo_width() or 600 # Use larger default
+            canvas_height = self.preview_canvas.winfo_height() or 500 # Use larger default
+            
+            # Background rectangle
+            bg_color = "#383838"
+            self.preview_canvas.create_rectangle(
+                10, 10, canvas_width - 10, canvas_height - 10,
+                fill=bg_color, outline="#555555", width=1
+            )
+            
+            # Header
+            header_text = "Model Evaluation Results"
+            header_color = "#77AADD"
+            self.preview_canvas.create_text(
+                canvas_width // 2, 30,
+                text=header_text,
+                fill=header_color, font=("Arial", 16, "bold"),
+                anchor=tk.CENTER
+            )
+            
+            # Prepare data for display
+            model_types = list(results.keys())
+            metrics_to_display = {
+                "fps": "FPS",
+                "mean_inference_time": "Avg Inference (s)",
+                "total_detections": "Total Detections",
+                "unique_classes_detected": "Unique Classes",
+                "AP_IoU=0.50:0.95": "mAP [0.5:0.95]",
+                "AP_IoU=0.50": "AP@0.50",
+                "successful_inferences": "Success %" # Note: This reflects processing success, not detection accuracy.
+            }
+            
+            data = {"Metric": list(metrics_to_display.values())}
+            
+            for model in model_types:
+                model_data = []
+                metrics = results.get(model, {})
+                coco_metrics = metrics.get("coco_metrics", {}) or {} # Handle None
+                total_images = metrics.get("total_images", 1) # Avoid division by zero
+                
+                for key, display_name in metrics_to_display.items():
+                    value = None
+                    if key in metrics:
+                        value = metrics[key]
+                    elif key in coco_metrics:
+                        value = coco_metrics[key]
+                    
+                    # Format values
+                    if value is None:
+                        formatted_value = "N/A"
+                    elif key == "successful_inferences":
+                        # Clarification: This metric indicates the percentage of images 
+                        # processed without runtime errors, not detection accuracy.
+                        success_count = metrics.get("successful_inferences", 0)
+                        formatted_value = f"{(success_count / total_images * 100):.1f}%" if total_images > 0 else "0.0%"
+                    elif isinstance(value, float):
+                        if key == "fps":
+                            formatted_value = f"{value:.1f}"
+                        elif "time" in key:
+                            formatted_value = f"{value:.3f}"
+                        else: # mAP/AP
+                            formatted_value = f"{value:.3f}"
+                    else:
+                        formatted_value = str(value)
+                        
+                    model_data.append(formatted_value)
+                data[model.upper()] = model_data
+
+            # Use pandas to create a string representation of the table
+            try:
+                df = pd.DataFrame(data)
+                table_str = df.to_string(index=False, justify='center')
+            except ImportError:
+                # Fallback if pandas is not available (less neat)
+                table_str = "Pandas not found. Cannot display table.\n\n"
+                for model in model_types:
+                    table_str += f"--- {model.upper()} ---\n"
+                    for key, display_name in metrics_to_display.items():
+                         value = results.get(model, {}).get(key) or \
+                                 (results.get(model, {}).get("coco_metrics", {}) or {}).get(key)
+                         table_str += f"{display_name}: {value}\n"
+                    table_str += "\n"
+
+            # Display the table string on the canvas
+            # Use a fixed-width font for better table alignment
+            self.preview_canvas.create_text(
+                canvas_width // 2, 
+                70, # Start below header
+                text=table_str,
+                fill="#FFFFFF", font=("Courier New", 10), # Fixed-width font
+                anchor=tk.N, # Anchor to top-center
+                justify=tk.LEFT # Left justify lines
+            )
+
+            # Add footer
+            footer_color = "#AAAAAA"
+            self.preview_canvas.create_text(
+                canvas_width // 2, canvas_height - 20,
+                text="Evaluation complete. Detailed reports in 'inference/results'.",
+                fill=footer_color, font=("Arial", 10),
+                anchor=tk.CENTER
+            )
+
+        except Exception as e:
+            print(f"Error displaying evaluation results: {e}")
+            traceback.print_exc()
+            self.show_preview_message(f"Error displaying evaluation results:\n{str(e)}")
 
     def start_webcam_detection(self):
         """Start or stop real-time detection using the webcam."""
@@ -1563,92 +1800,134 @@ class GraphicalGUI:
 
         wait_for_thread()
 
-    def add_webcam_button(self):
+    def add_webcam_button(self, parent_frame):
         """Add a button to start/stop webcam detection."""
-        run_frame = ttk.Frame(self.root)
-        run_frame.pack(fill=tk.X, padx=5, pady=10)
-
-        self.webcam_button = ttk.Button(run_frame, text="Start Camera", command=self.start_webcam_detection, width=15)
+        self.webcam_button = ttk.Button(parent_frame, text="Start Camera", command=self.start_webcam_detection, width=15)
         self.webcam_button.pack(side=tk.LEFT, padx=5)
 
     def _process_webcam_thread(self, model_manager):
         """Thread function to process webcam frames in real-time with optimizations."""
         try:
-            cap = cv2.VideoCapture(0)  # Open the default webcam
-            if not cap.isOpened():
-                self.show_preview_message("Cannot access webcam")
-                return
+            # Use the already opened webcam object if available
+            if not hasattr(self, 'webcam') or self.webcam is None or not self.webcam.isOpened():
+                 self.webcam = cv2.VideoCapture(0) # Open the default webcam
+                 if not self.webcam.isOpened():
+                     self.show_preview_message("Cannot access webcam")
+                     self.processing_active = False # Ensure state is reset
+                     self.root.after(0, lambda: self.webcam_button.config(text="Start Camera")) # Reset button
+                     return
+            
+            cap = self.webcam # Use the instance variable
 
             # Get webcam properties
             width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
             height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
 
-            # Calculate resize ratio to fit in the canvas
+            # --- Performance Optimizations ---
+            # 1. Processing Resolution (already implemented via resize)
+            process_width = 640
+            process_height = 480
+            
+            # 2. Frame Skipping (already implemented)
+            frame_skip = 2  # Process every Nth frame
+
+            # 3. UI Update Rate Limit
+            webcam_fps = cap.get(cv2.CAP_PROP_FPS) or 30 # Estimate if needed
+            target_display_fps = min(15, webcam_fps / frame_skip) # Limit display FPS
+            frame_interval_ms = int(1000 / target_display_fps) if target_display_fps > 0 else 100 # Min 100ms interval
+            # --- End Optimizations ---
+
+            # Calculate resize ratio for display
             canvas_width = self.preview_canvas.winfo_width() or 400
             canvas_height = self.preview_canvas.winfo_height() or 300
-            ratio = min(canvas_width / width, canvas_height / height)
-            new_width = int(width * ratio)
-            new_height = int(height * ratio)
-
-            frame_skip = 2  # Process every 2nd frame to improve performance
+            display_ratio = min(canvas_width / process_width, canvas_height / process_height)
+            display_width = int(process_width * display_ratio)
+            display_height = int(process_height * display_ratio)
             
             # Reset statistics
-            self.frame_count = 0
-            self.total_frames = 0
+            self.frame_count = 0 # Processed frames
+            self.total_frames = 0 # Total frames read
             self.detection_counts = {}
             start_time = time.time()
+            last_update_time = 0
+            processing_errors = 0
+            
+            model_device = getattr(model_manager, 'device', 'unknown')
+            print(f"Starting webcam processing with {model_manager.model_type} on {model_device}")
 
             while not self.stop_preview:
                 ret, frame = cap.read()
                 if not ret:
-                    break
+                    print("Webcam stream ended or error reading frame.")
+                    break # Exit loop if frame read fails
 
-                self.total_frames += 1  # Count total frames
+                self.total_frames += 1  # Count total frames read
+                
+                # Apply frame skipping
                 if self.total_frames % frame_skip != 0:
-                    continue  # Skip frames to improve FPS
+                    continue  # Skip frames
 
                 self.frame_count += 1  # Count processed frames
+                current_time = int(time.time() * 1000)
                 
+                # Update status periodically
+                if self.frame_count % 10 == 0:
+                     self.root.after(0, lambda count=self.frame_count: 
+                                    self.status_var.set(f"Webcam processing frame {count}"))
+
                 try:
-                    # Resize frame to reduce processing time
-                    resized_frame = cv2.resize(frame, (640, 480))
+                    # Resize frame for processing
+                    frame_resized_for_processing = cv2.resize(frame, (process_width, process_height))
 
-                    # Process frame with the model
-                    results = model_manager.predict(resized_frame)
-                    if results and len(results) == 3:
-                        detections, segmentations, annotated_frame = results
+                    # Perform prediction and get annotated frame directly
+                    detections, segmentations, annotated_frame = model_manager.predict(frame_resized_for_processing)
+
+                    # Update detection counts (optional for webcam, but good practice)
+                    for det in detections:
+                        class_name = det.get('class_name', 'Unknown')
+                        if class_name != 'Unknown':
+                            self.detection_counts[class_name] = self.detection_counts.get(class_name, 0) + 1
+
+                    # Limit display update rate
+                    if (current_time - last_update_time) >= frame_interval_ms:
+                        # Resize annotated frame for display
+                        frame_resized_for_display = cv2.resize(annotated_frame, (display_width, display_height))
+                        frame_rgb = cv2.cvtColor(frame_resized_for_display, cv2.COLOR_BGR2RGB)
                         
-                        # Update detection counts
-                        for detection in detections:
-                            if "class_name" in detection:
-                                class_name = detection["class_name"]
-                                self.detection_counts[class_name] = self.detection_counts.get(class_name, 0) + 1
-                    else:
-                        annotated_frame = resized_frame.copy()
-                        cv2.putText(annotated_frame, "No detection results", (30, 30),
-                                    cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
-
-                    # Convert and resize for display
-                    frame_rgb = cv2.cvtColor(annotated_frame, cv2.COLOR_BGR2RGB)
-                    frame_resized = cv2.resize(frame_rgb, (new_width, new_height))
-
-                    # Create PhotoImage and update canvas on main thread
-                    pil_img = Image.fromarray(frame_resized)
-                    self.root.after(0, self._update_video_canvas, pil_img, self.frame_count, self.total_frames, model_manager.model_type)
+                        # Update canvas on main thread
+                        pil_img = Image.fromarray(frame_rgb)
+                        # Use _update_video_canvas for consistency
+                        self.root.after(0, self._update_video_canvas, 
+                                       pil_img, self.frame_count, self.total_frames, model_manager.model_type) 
+                        
+                        last_update_time = current_time
 
                 except Exception as e:
-                    print(f"Error processing webcam frame: {e}")
+                    processing_errors += 1
+                    print(f"Error processing webcam frame {self.frame_count}: {e}")
+                    # Don't show message box for webcam errors to avoid spamming
+                    if processing_errors > 10 and processing_errors % 50 == 0: # Log occasionally
+                         print("Multiple webcam processing errors occurred.")
+                    # Continue processing next frame
 
             # Calculate total processing time
             self.processing_time = time.time() - start_time
             
-            cap.release()
-            self.processing_active = False
+            # Release webcam ONLY if we opened it in this thread (or handle externally)
+            # The current logic in start/stop suggests releasing it in stop_webcam_detection
+            # cap.release() # Avoid releasing here if managed externally
+            
+            print(f"Webcam processing stopped. Processed {self.frame_count} frames.")
+            # Statistics are shown by stop_webcam_detection after the thread finishes
 
         except Exception as e:
-            print(f"Error in webcam processing thread: {e}")
+            print(f"Fatal error in webcam processing thread: {e}")
             traceback.print_exc()
+            self.root.after(0, lambda err=str(e): self.show_preview_message(f"Webcam Error:\n{err}"))
+        finally:
+            # Ensure state is reset even if errors occur
             self.processing_active = False
+            # Let stop_webcam_detection handle button reset and stats display
 
     def check_gpu_availability(self):
         """Check if GPU is available and update the status with detailed information."""
