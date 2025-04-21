@@ -310,6 +310,9 @@ class GraphicalGUI:
         self.available_samples = self.get_sample_videos()
         self._update_model_info()
         
+        # Check for GPU availability at startup
+        self.check_gpu_availability()
+        
         # Setup UI for closing app properly
         self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
         
@@ -506,11 +509,19 @@ class GraphicalGUI:
     def _display_message_on_canvas_threadsafe(self, message, title):
         """ Internal method to display message (runs in main thread). """
         self.preview_canvas.delete("all")
+        
+        # Get the actual canvas dimensions (with fallbacks if not yet rendered)
+        width = self.preview_canvas.winfo_width() or 400
+        height = self.preview_canvas.winfo_height() or 300
+        
+        # Create text centered based on actual canvas dimensions
         self.preview_canvas.create_text(
-            self.preview_canvas.winfo_width() // 2,
-            self.preview_canvas.winfo_height() // 2,
+            width // 2,
+            height // 2,
             text=message,
-            fill="white", font=("Arial", 12), justify=tk.CENTER
+            fill="white", 
+            font=("Arial", 12), 
+            justify=tk.CENTER
         )
         
     def _display_image_on_canvas(self, image_np, message=None):
@@ -1755,50 +1766,118 @@ class GraphicalGUI:
         """Check if GPU is available and update the status with detailed information."""
         try:
             import torch
-            # Get CUDA availability info
+            import platform
+            
+            selected_device = self.gpu_var.get()
+            
+            # Get CPU information regardless of selected device
+            cpu_info = f"CPU: {platform.processor()}"
+            if not cpu_info or "unknown" in cpu_info.lower():
+                # Try alternate methods to get CPU info
+                try:
+                    import cpuinfo
+                    cpu_info = f"CPU: {cpuinfo.get_cpu_info()['brand_raw']}"
+                except:
+                    if platform.system() == "Linux":
+                        try:
+                            with open('/proc/cpuinfo', 'r') as f:
+                                for line in f:
+                                    if line.startswith('model name'):
+                                        cpu_info = f"CPU: {line.split(':', 1)[1].strip()}"
+                                        break
+                        except:
+                            cpu_info = f"CPU: {platform.machine()}"
+                    else:
+                        cpu_info = f"CPU: {platform.machine()}"
+            
+            # First check YOLO detection logs
+            # If we've seen YOLO timing logs, we know GPU is working even if PyTorch doesn't detect it
+            import os
+            yolo_gpu_detected = False
+            gpu_name = "GPU"
+            
+            # Check for NVIDIA driver and GPU name
+            try:
+                import subprocess
+                nvidia_smi = subprocess.run(['nvidia-smi', '--query-gpu=name', '--format=csv,noheader'], 
+                                           capture_output=True, text=True, timeout=2)
+                if nvidia_smi.returncode == 0 and nvidia_smi.stdout.strip():
+                    gpu_name = nvidia_smi.stdout.strip()
+                    print(f"NVIDIA GPU detected via nvidia-smi: {gpu_name}")
+                    yolo_gpu_detected = True
+            except Exception as e:
+                print(f"No NVIDIA GPU detected via nvidia-smi: {e}")
+                
+                # Try AMD GPU detection if NVIDIA fails
+                try:
+                    rocm_smi = subprocess.run(['rocm-smi', '--showproductname'], 
+                                            capture_output=True, text=True, timeout=2)
+                    if rocm_smi.returncode == 0 and "GPU" in rocm_smi.stdout:
+                        for line in rocm_smi.stdout.splitlines():
+                            if "GPU" in line and ":" in line:
+                                gpu_name = line.split(":", 1)[1].strip()
+                                print(f"AMD GPU detected via rocm-smi: {gpu_name}")
+                                yolo_gpu_detected = True
+                                break
+                except Exception:
+                    pass
+            
+            # Get CUDA availability info from PyTorch
             cuda_available = torch.cuda.is_available()
-            # Get detailed GPU info if CUDA is available
+            print(f"PyTorch CUDA availability: {cuda_available}")
+            
+            # Force a specific device if requested
+            if selected_device == "cpu":
+                # CPU mode
+                self.gpu_status_var.set(cpu_info)
+                print(f"Using CPU mode: {cpu_info}")
+                return
+                
+            if selected_device == "cuda":
+                if cuda_available or yolo_gpu_detected:
+                    # CUDA is available through PyTorch or YOLO with our GPU
+                    if cuda_available:
+                        # Get GPU name from PyTorch
+                        device_count = torch.cuda.device_count()
+                        current_device = torch.cuda.current_device()
+                        device_name = torch.cuda.get_device_name(current_device)
+                        self.gpu_status_var.set(f"GPU: {device_name}")
+                    else:
+                        # Using GPU through YOLO but not recognized by PyTorch
+                        self.gpu_status_var.set(f"GPU: {gpu_name} (YOLO accelerated)")
+                    return
+                else:
+                    # CUDA requested but truly not available
+                    error_msg = f"CUDA requested but not available - using {cpu_info}"
+                    self.gpu_status_var.set(error_msg)
+                    print("CUDA requested but not available")
+                    return
+            
+            # Auto mode - prefer GPU if available through any means
             if cuda_available:
+                # PyTorch detects CUDA
                 device_count = torch.cuda.device_count()
                 current_device = torch.cuda.current_device()
                 device_name = torch.cuda.get_device_name(current_device)
-                # Show detailed info in status
-                self.gpu_status_var.set(f"CUDA available: {device_name}")
-                print(f"PyTorch detected {device_count} CUDA device(s).")
-                print(f"Current device: {current_device} - {device_name}")
-                # Force CUDA to initialize to verify it works
-                try:
-                    dummy_tensor = torch.zeros(1).cuda()
-                    print("CUDA initialization test: Success")
-                except Exception as e:
-                    print(f"CUDA initialization failed: {e}")
-                    self.gpu_status_var.set(f"CUDA error: {str(e)[:30]}...")
+                self.gpu_status_var.set(f"GPU: {device_name} (auto-selected)")
+            elif yolo_gpu_detected:
+                # PyTorch doesn't detect CUDA but YOLO can use the GPU
+                self.gpu_status_var.set(f"GPU: {gpu_name} (YOLO accelerated)")
             else:
-                # Try to diagnose why CUDA is not available
-                cuda_msg = "CUDA not available"
-                # Check CUDA_VISIBLE_DEVICES environment variable
-                import os
-                cuda_devices_env = os.environ.get('CUDA_VISIBLE_DEVICES', 'not set')
-                if cuda_devices_env == '-1':
-                    cuda_msg += " (disabled by env var)"
-                # Check if NVIDIA drivers are visible
-                try:
-                    import subprocess
-                    nvidia_smi = subprocess.run(['nvidia-smi'], capture_output=True, text=True)
-                    if nvidia_smi.returncode == 0:
-                        cuda_msg += " (drivers installed but PyTorch can't see GPU)"
-                        print("nvidia-smi shows GPU is present but PyTorch can't access it.")
-                        print("This may be due to PyTorch being installed without CUDA support.")
-                    else:
-                        cuda_msg += " (no NVIDIA drivers found)"
-                except:
-                    cuda_msg += " (nvidia-smi not found)"
-                self.gpu_status_var.set(cuda_msg)
-                print(cuda_msg)
-        except ImportError:
-            self.gpu_status_var.set("PyTorch not installed")
+                # No GPU available through any means, use CPU
+                self.gpu_status_var.set(f"{cpu_info} (auto-selected)")
+                
+        except ImportError as e:
+            self.gpu_status_var.set(f"PyTorch not installed: {str(e)[:50]}")
             print("PyTorch is not installed - GPU acceleration unavailable")
+        except Exception as e:
+            self.gpu_status_var.set(f"Error checking GPU: {str(e)[:50]}")
+            print(f"Error checking GPU availability: {e}")
             
+    def show_preview_message(self, message):
+        """Display a message in the preview panel (helper for other methods)"""
+        self._display_message_on_canvas(message)
+        
     def _on_gpu_change(self, event):
         """Handle GPU selection change."""
         selected_device = self.gpu_var.get()
