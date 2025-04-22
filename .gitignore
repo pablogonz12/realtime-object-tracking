@@ -49,4 +49,5 @@ Thumbs.db
 
 # Inference evaluation outputs
 inference/results/
+inference/output_videos/
 

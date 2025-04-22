@@ -26,7 +26,7 @@ VIDEO_DIR = PROJECT_ROOT / "data_sets" / "video_data" / "samples"
 OUTPUT_DIR = PROJECT_ROOT / "inference" / "output_videos"
 OUTPUT_DIR.mkdir(exist_ok=True, parents=True)
 
-def create_demo_video(model_type, video_path, output_path=None, model_path=None, config_path=None):
+def create_demo_video(model_type, video_path, output_path=None, model_path=None, config_path=None, progress_callback=None):
     """
     Create a demonstration video with object detection and segmentation overlay
     
@@ -36,6 +36,7 @@ def create_demo_video(model_type, video_path, output_path=None, model_path=None,
         output_path (str or Path, optional): Path to save output video file
         model_path (str or Path, optional): Path to model weights file
         config_path (str or Path, optional): Path to model configuration file
+        progress_callback (callable, optional): Callback function to report progress (frame_idx, total_frames)
     
     Returns:
         str: Path to the output video file
@@ -103,6 +104,10 @@ def create_demo_video(model_type, video_path, output_path=None, model_path=None,
                 break
             
             frame_count += 1
+            
+            # Call progress callback if provided
+            if progress_callback and total_frames > 0:
+                progress_callback(frame_count, total_frames)
             
             # Show progress
             if frame_count % 30 == 0:  # Update every 30 frames
