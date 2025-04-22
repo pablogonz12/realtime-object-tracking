@@ -467,10 +467,20 @@ class GraphicalGUI:
         self.processing_buttons_frame.grid(row=0, column=1, columnspan=3, sticky="e")
         
         self.run_button = ttk.Button(self.processing_buttons_frame, text="Run Model", command=self._run_model)
-        self.pause_button = ttk.Button(self.processing_buttons_frame, text="Pause", command=self._pause_processing)
-        self.stop_button = ttk.Button(self.processing_buttons_frame, text="Stop", command=self._stop_processing)
+        self.pause_button = ttk.Button(self.processing_buttons_frame, text="Pause", command=self.pause_processing)
+        self.stop_button = ttk.Button(self.processing_buttons_frame, text="Stop", command=self.stop_processing)
         
         self._update_buttons(processing=False)
+
+    def stop_processing(self):
+        """Stop video processing"""
+        self.stop_preview = True
+        self.pause_processing = False
+        self.status_var.set("Processing stopped")
+        # Reset processing state
+        self.processing_active = False
+        # Update buttons back to normal
+        self._update_buttons(False)
         
     def _setup_preview_panel(self, parent):
         """Setup the video preview canvas."""
@@ -1096,6 +1106,10 @@ class GraphicalGUI:
                 self.video_thread.join(timeout=1.0)
             except Exception as e:
                 print(f"Error stopping video thread: {e}")
+        
+        # Unbind any global keys we've set
+        self.root.unbind("<space>")
+        
         # Destroy the window
         self.root.destroy()
         
@@ -1126,11 +1140,19 @@ class GraphicalGUI:
         self.status_var.set(f"{title} video: {os.path.basename(video_path)}")
         
         # Create a thread to play the video in the preview panel
-        self.stop_preview = True  # Stop any existing preview
-        if hasattr(self, 'video_thread') and self.video_thread and self.video_thread.is_alive():
-            self.video_thread.join(timeout=1.0)
-        self.stop_preview = False
+        # Signal to stop any existing preview first
+        self.stop_preview = True
         
+        # Clean up before starting new thread
+        if hasattr(self, 'video_thread') and self.video_thread and self.video_thread.is_alive():
+            # Short timeout for thread to terminate
+            try:
+                self.video_thread.join(timeout=0.5)
+            except Exception as e:
+                print(f"Warning: Could not join existing video thread: {e}")
+        
+        # Start fresh thread
+        self.stop_preview = False
         self.video_thread = threading.Thread(
             target=self._play_video_thread,
             args=(video_path, is_preview, autoplay),
@@ -1141,6 +1163,15 @@ class GraphicalGUI:
     def _play_video_thread(self, video_path, is_preview=False, autoplay=False):
         """Thread to play video in preview panel"""
         try:
+            # Ensure any existing playback is stopped
+            self.stop_preview = True
+            if hasattr(self, 'video_thread') and self.video_thread and self.video_thread.is_alive():
+                time.sleep(0.1)  # Brief pause to allow cleanup
+                
+            # Reset playback state
+            self.stop_preview = False
+            self.seek_to_frame = None
+            
             # Open the video file
             cap = cv2.VideoCapture(video_path)
             if not cap.isOpened():
@@ -1161,7 +1192,7 @@ class GraphicalGUI:
             display_width = int(width * ratio)
             display_height = int(height * ratio)
             
-            # Create playback controls on the canvas
+            # Create playback controls on the canvas - simplified for smoother operation
             self.root.after(0, self._create_video_controls, total_frames)
             
             # Frame timing
@@ -1169,82 +1200,29 @@ class GraphicalGUI:
             preview_fps = min(15, fps)  # Limit preview to 15 FPS max to save resources
             preview_frame_time = 1.0 / preview_fps
             
-            # Playback state
+            # Playback state - always playing in preview mode
             frame_idx = 0
-            playing = autoplay  # Start playing automatically if requested
-            self.video_playing = playing
             
-            # For preview mode with no autoplay, we'll just show the first frame with controls
-            if is_preview and not autoplay:
-                ret, frame = cap.read()
-                if ret:
-                    # Add video info as an overlay
-                    info_text = f"{width}x{height}, {fps:.1f} FPS, {total_frames} frames"
-                    frame_resized = cv2.resize(frame, (display_width, display_height))
-                    
-                    # Add semi-transparent info bar
-                    overlay = frame_resized.copy()
-                    h, w = frame_resized.shape[:2]
-                    cv2.rectangle(overlay, (0, 0), (w, 40), (0, 0, 0), -1)
-                    alpha = 0.7
-                    cv2.addWeighted(overlay, alpha, frame_resized, 1 - alpha, 0, frame_resized)
-                    
-                    # Add text
-                    cv2.putText(frame_resized, info_text, (10, 30),
-                               cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
-                    
-                    frame_rgb = cv2.cvtColor(frame_resized, cv2.COLOR_BGR2RGB)
-                    pil_img = Image.fromarray(frame_rgb)
-                    self.root.after(0, self._update_video_display, pil_img)
-                    
-                    # Add button to process this video
-                    button_y = canvas_height - 80
-                    # Create background rectangle for the button
-                    btn_width = 150
-                    btn_height = 40
-                    btn_x = (canvas_width - btn_width) // 2
-                    
-                    # Add two buttons - Play and Run Model
-                    self.root.after(0, lambda: self._add_preview_buttons(btn_x, button_y, btn_width, btn_height))
-                    
-                    # Update the progress bar to show we can seek
-                    self.root.after(0, self._update_video_progress, 0, total_frames)
-                    
-                    # Keep thread alive but don't continue playback
-                    while not self.stop_preview:
-                        if self.video_playing:
-                            # User clicked Play - break out to regular playback
-                            break
-                        time.sleep(0.1)
-                    
-                    # If we were stopped without playing, clean up and exit
-                    if self.stop_preview:
-                        cap.release()
-                        return
-                    
-                    # Otherwise continue with normal playback below
-                
             # Main playback loop
             while not self.stop_preview:
-                if not self.video_playing:
-                    time.sleep(0.1)  # Reduce CPU usage while paused
-                    continue
-                    
-                # Seek to specific frame if needed
-                if hasattr(self, 'seek_to_frame') and self.seek_to_frame is not None:
-                    cap.set(cv2.CAP_PROP_POS_FRAMES, self.seek_to_frame)
-                    frame_idx = self.seek_to_frame
-                    self.seek_to_frame = None
-                
                 # Read frame
                 ret, frame = cap.read()
                 if not ret:
-                    # Loop back to beginning
+                    # End of video reached
+                    print("End of video reached")
+                    # Reset to beginning for looping
                     cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
                     frame_idx = 0
                     continue
-                    
+                
                 frame_idx += 1
+                
+                # Handle seeking (if requested)
+                if self.seek_to_frame is not None:
+                    cap.set(cv2.CAP_PROP_POS_FRAMES, self.seek_to_frame)
+                    frame_idx = self.seek_to_frame
+                    self.seek_to_frame = None
+                    continue
                 
                 # Update progress bar
                 self.root.after(0, self._update_video_progress, frame_idx, total_frames)
@@ -1254,17 +1232,10 @@ class GraphicalGUI:
                 
                 # In preview mode, add video info overlay
                 if is_preview:
-                    # Add semi-transparent info bar
-                    overlay = frame_resized.copy()
-                    h, w = frame_resized.shape[:2]
-                    cv2.rectangle(overlay, (0, 0), (w, 40), (0, 0, 0), -1)
-                    alpha = 0.7
-                    cv2.addWeighted(overlay, alpha, frame_resized, 1 - alpha, 0, frame_resized)
-                    
-                    # Add text showing video info
-                    info_text = f"{width}x{height}, {fps:.1f} FPS" 
-                    cv2.putText(frame_resized, info_text, (10, 30),
-                              cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+                    # Add video name and frame count as overlay
+                    info_text = f"{os.path.basename(video_path)} - Frame {frame_idx}/{total_frames}"
+                    cv2.putText(frame_resized, info_text, (10, 30), 
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
                 
                 frame_rgb = cv2.cvtColor(frame_resized, cv2.COLOR_BGR2RGB)
                 
@@ -1274,7 +1245,7 @@ class GraphicalGUI:
                 # Update canvas on main thread
                 self.root.after(0, self._update_video_display, pil_img)
                 
-                # Control playback speed, using different rates for preview vs normal playback
+                # Control playback speed
                 sleep_time = preview_frame_time if is_preview else target_frame_time
                 time.sleep(sleep_time)
                     
@@ -1287,1089 +1258,9 @@ class GraphicalGUI:
             print(f"Error playing video: {e}")
             self.root.after(0, lambda err=str(e): self.show_preview_message(
                 f"Error playing video:\n{err}"))
-                
-    def _add_preview_buttons(self, x, y, width, height):
-        """Add Play and Run Model buttons to the video preview"""
-        # Calculate positions for two buttons side by side
-        spacing = 20
-        button_width = width
-        button_height = height
-        
-        # Play button (left)
-        play_x = x - spacing - button_width//2
-        
-        self.preview_canvas.create_rectangle(
-            play_x, y, play_x + button_width, y + button_height,
-            fill="#4CAF50", outline="#2E7D32", width=2,
-            tags=("play_preview_btn",)
-        )
-        
-        self.preview_canvas.create_text(
-            play_x + button_width // 2, y + button_height // 2,
-            text="Play Video",
-            fill="white", font=("Arial", 12, "bold"),
-            tags=("play_preview_btn",)
-        )
-        
-        # Run Model button (right)
-        run_x = x + spacing + button_width//2
-        
-        self.preview_canvas.create_rectangle(
-            run_x, y, run_x + button_width, y + button_height,
-            fill="#2196F3", outline="#0D47A1", width=2,
-            tags=("run_model_btn",)
-        )
-        
-        self.preview_canvas.create_text(
-            run_x + button_width // 2, y + button_height // 2,
-            text="Run Model",
-            fill="white", font=("Arial", 12, "bold"),
-            tags=("run_model_btn",)
-        )
-        
-        # Bind click events
-        self.preview_canvas.tag_bind("play_preview_btn", "<Button-1>", 
-                                   lambda event: self._start_preview_playback())
-        
-        self.preview_canvas.tag_bind("run_model_btn", "<Button-1>", 
-                                   lambda event: self._run_model())
-        
-        # Add hover effect for both buttons
-        for tag in ["play_preview_btn", "run_model_btn"]:
-            self.preview_canvas.tag_bind(tag, "<Enter>", 
-                                      lambda event: self.preview_canvas.config(cursor="hand2"))
-            self.preview_canvas.tag_bind(tag, "<Leave>", 
-                                      lambda event: self.preview_canvas.config(cursor=""))
-                                      
-    def _start_preview_playback(self):
-        """Start playing the preview video"""
-        self.video_playing = True
-        
-    def _create_video_controls(self, total_frames):
-        """Create video playback controls on the canvas"""
-        # Clean up any existing controls
-        self._remove_video_controls()
-        
-        canvas_width = self.preview_canvas.winfo_width()
-        canvas_height = self.preview_canvas.winfo_height()
-        
-        # Create semi-transparent background for controls
-        control_bg = self.preview_canvas.create_rectangle(
-            0, canvas_height - 50, 
-            canvas_width, canvas_height,
-            fill="#222222", stipple="gray50",
-            tags="video_controls"
-        )
-        
-        # Create progress bar background
-        progress_bg = self.preview_canvas.create_rectangle(
-            20, canvas_height - 30,
-            canvas_width - 20, canvas_height - 20,
-            fill="#444444", outline="#666666",
-            tags="video_controls"
-        )
-        
-        # Create progress indicator (starts at 0%)
-        self.video_progress = self.preview_canvas.create_rectangle(
-            20, canvas_height - 30,
-            20, canvas_height - 20,
-            fill="#77AADD", outline="",
-            tags="video_controls"
-        )
-        
-        # Add play/pause toggle button
-        play_btn_size = 30
-        play_btn_x = 20
-        play_btn_y = canvas_height - 55
-        
-        # Play/pause button (circle with triangle/bars)
-        self.play_pause_btn = self.preview_canvas.create_oval(
-            play_btn_x, play_btn_y,
-            play_btn_x + play_btn_size, play_btn_y + play_btn_size,
-            fill="#555555", outline="#888888",
-            tags=("video_controls", "play_pause_btn")
-        )
-        
-        # Initial button state - depends on video_playing
-        if not hasattr(self, 'video_playing'):
-            self.video_playing = False
-            
-        self._update_play_pause_button()
-        
-        # Bind play/pause button click
-        self.preview_canvas.tag_bind("play_pause_btn", "<Button-1>", 
-                                   lambda event: self._toggle_playback())
-        
-        # Make progress bar clickable for seeking
-        self.preview_canvas.tag_bind(progress_bg, "<Button-1>", 
-                                   lambda event: self._seek_video(event, total_frames, canvas_width))
-        
-        # Store control dimensions for updates
-        self.video_control_dims = {
-            'total_frames': total_frames,
-            'progress_left': 20,
-            'progress_right': canvas_width - 20,
-            'progress_top': canvas_height - 30,
-            'progress_bottom': canvas_height - 20
-        }
-        
-    def _toggle_playback(self):
-        """Toggle video playback between play and pause states"""
-        self.video_playing = not self.video_playing
-        self._update_play_pause_button()
-        
-    def _update_play_pause_button(self):
-        """Update the play/pause button appearance based on state"""
-        if not hasattr(self, 'play_pause_btn'):
-            return
-            
-        # Remove existing play/pause icon
-        for item in self.preview_canvas.find_withtag("play_pause_icon"):
-            self.preview_canvas.delete(item)
-        
-        # Get button coordinates
-        coords = self.preview_canvas.coords(self.play_pause_btn)
-        if not coords or len(coords) != 4:
-            return
-            
-        # Calculate center and size
-        x1, y1, x2, y2 = coords
-        center_x = (x1 + x2) / 2
-        center_y = (y1 + y2) / 2
-        size = (x2 - x1) * 0.3  # Icon size relative to button
-        
-        # Draw play or pause icon
-        if self.video_playing:
-            # Pause icon (two vertical bars)
-            bar_width = size * 0.5
-            spacing = size * 0.5
-            
-            # Left bar
-            self.preview_canvas.create_rectangle(
-                center_x - spacing - bar_width, center_y - size,
-                center_x - spacing, center_y + size,
-                fill="white", outline="",
-                tags=("video_controls", "play_pause_icon")
-            )
-            
-            # Right bar
-            self.preview_canvas.create_rectangle(
-                center_x + spacing, center_y - size,
-                center_x + spacing + bar_width, center_y + size,
-                fill="white", outline="",
-                tags=("video_controls", "play_pause_icon")
-            )
-        else:
-            # Play icon (triangle)
-            self.preview_canvas.create_polygon(
-                center_x - size, center_y - size,  # Top left
-                center_x - size, center_y + size,  # Bottom left
-                center_x + size * 1.5, center_y,   # Right point
-                fill="white", outline="",
-                tags=("video_controls", "play_pause_icon")
-            )
-        
-    def process_video_with_model(self, video_path, model_manager):
-        """Process video with object detection/segmentation overlays and display in preview panel
-        
-        Args:
-            video_path (str): Path to video file
-            model_manager (ModelManager): Initialized model manager
-        """
-        # Stop any existing preview
-        self.stop_preview = True
-        if hasattr(self, 'video_thread') and self.video_thread and self.video_thread.is_alive():
-            self.video_thread.join(timeout=1.0)
-        self.stop_preview = False
-        # Clear previous content
-        self.preview_canvas.delete("all")
-        # Display processing message
-        self.preview_message = self.preview_canvas.create_text(
-            self.preview_canvas.winfo_width() // 2, 
-            self.preview_canvas.winfo_height() // 2,
-            text=f"Processing video with {model_manager.model_type}...",
-            fill="white", font=("Arial", 12), justify=tk.CENTER
-        )
-        self.root.update_idletasks()
-        # Show pause and stop buttons
-        self.pause_button.pack(side=tk.LEFT, padx=5)
-        self.stop_button.pack(side=tk.LEFT, padx=5)
-        # Start processing in a separate thread
-        self.video_thread = threading.Thread(
-            target=self._process_video_thread,
-            args=(video_path, model_manager),
-            daemon=True
-        )
-        self.video_thread.start()
-        
-    def _process_video_thread(self, video_path, model_manager):
-        """Thread function to process and display video frames"""
-        try:
-            # Open the video file
-            cap = cv2.VideoCapture(video_path)
-            if not cap.isOpened():
-                self.show_preview_message(f"Cannot open video:\n{video_path}")
-                return
-            # Get video properties
-            width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-            height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-            fps = cap.get(cv2.CAP_PROP_FPS)
-            total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-            # --- Performance Optimizations ---
-            # 1. Frame Skipping: Process every Nth frame
-            frame_skip = 2 # Process every 2nd frame (adjust as needed)
-            # 2. Processing Resolution: Resize before inference
-            process_width = 640 # Standard processing width
-            process_height = 480 # Standard processing height
-            # 3. UI Update Rate Limitations ---
-            target_display_fps = min(15, fps / frame_skip) # Limit display FPS
-            frame_interval_ms = int(1000 / target_display_fps) if target_display_fps > 0 else 100 # Min 100ms interval
-            # --- End Optimizations ---
-            # Store canvas dimensions for resizing display frames
-            canvas_width = self.preview_canvas.winfo_width() or 400  
-            canvas_height = self.preview_canvas.winfo_height() or 300
-            # Calculate scaling ratio to fit display frame in the canvas
-            display_ratio = min(canvas_width / process_width, canvas_height / process_height)
-            display_width = int(process_width * display_ratio)
-            display_height = int(process_height * display_ratio)
-            frame_index = 0 # Keep track of original frame index
-            processed_frame_count = 0 # Keep track of frames actually processed
-            processing_errors = 0
-            last_update_time = 0
-            # Statistics tracking
-            start_time = time.time()
-            pause_time = 0
-            total_pause_duration = 0
-            detection_counts = {}
-            print(f"Starting video processing with {model_manager.model_type} model...")
-            model_device = getattr(model_manager, 'device', 'unknown')
-            print(f"Model device: {model_device}")
-            while not self.stop_preview:
-                # Handle pausing
-                if self.pause_processing:
-                    if pause_time == 0:                        
-                        pause_start_time = time.time() # Record when pause started
-                        self.root.after(0, lambda: self.status_var.set(f"Paused at frame {frame_index}/{total_frames}"))
-                        pause_time = pause_start_time # Set pause_time to non-zero
-                    time.sleep(0.1)  # Reduce CPU usage while paused
-                    continue
-                elif pause_time > 0:  # Just resumed
-                    total_pause_duration += (time.time() - pause_time)
-                    pause_time = 0
-                    self.root.after(0, lambda count=frame_index, total=total_frames: 
-                                   self.status_var.set(f"Resumed processing at frame {count}/{total}"))
-                # Read frame
-                ret, frame = cap.read()
-                if not ret:
-                    print("End of video stream.")
-                    break # Exit loop if frame read fails
-                frame_index += 1
-                # --- Apply Frame Skipping ---
-                if frame_index % frame_skip != 0:
-                    continue # Skip this frame
-                processed_frame_count += 1
-                current_time = int(time.time() * 1000)
-                # Update status periodically based on processed frames
-                if processed_frame_count % 5 == 0: # Update status less frequently
-                    self.root.after(0, lambda count=frame_index, total=total_frames: 
-                                   self.status_var.set(f"Processing frame {count}/{total} ({processed_frame_count} processed)"))
-                try:
-                    # --- Resize frame BEFORE processing ---
-                    frame_resized_for_processing = cv2.resize(frame, (process_width, process_height))
-                    # Process frame with model
-                    # Assuming model_manager methods handle the resized frame
-                    if model_manager.model_type == "sam":
-                        # SAM might need specific handling (e.g., embeddings first)
-                        # This part needs to be adapted based on how SAM is integrated
-                        # For now, assume a generic process_frame method exists
-                        annotated_frame, detections = model_manager.process_frame(frame_resized_for_processing)
-                    else:
-                        # Standard object detection/segmentation
-                        # predict now returns (detections, segmentations, annotated_frame)
-                        detections, segmentations, annotated_frame = model_manager.predict(frame_resized_for_processing) # Pass resized frame
-                        # Update detection counts using the returned detections list
-                        for det in detections:
-                            class_name = det.get('class_name', 'Unknown')
-                            if class_name != 'Unknown':
-                                detection_counts[class_name] = detection_counts.get(class_name, 0) + 1
-                    # Limit display update rate to keep UI responsive
-                    if (current_time - last_update_time) >= frame_interval_ms:
-                        # Resize the *annotated* frame for display
-                        frame_resized_for_display = cv2.resize(annotated_frame, (display_width, display_height))
-                        frame_rgb = cv2.cvtColor(frame_resized_for_display, cv2.COLOR_BGR2RGB)
-                        # Create PhotoImage and update canvas on main thread
-                        pil_img = Image.fromarray(frame_rgb)
-                        self.root.after(0, self._update_video_canvas, 
-                                       pil_img, frame_index, total_frames, model_manager.model_type)
-                        # Update timestamp
-                        last_update_time = current_time
-                    # No need for time.sleep(0.001) if UI updates are throttled
-                except Exception as e:
-                    processing_errors += 1
-                    print(f"Error processing frame {frame_index}: {e}")
-                    traceback.print_exc()
-                    if processing_errors <= 5:  # Limit error messages
-                        error_msg = f"Error processing frame {frame_index}: {str(e)[:50]}"
-                        self.root.after(0, lambda msg=error_msg: 
-                                      messagebox.showwarning("Processing Error", msg))
-            # Release resources
-            cap.release()
-            print("Video processing complete.")
-            # Calculate final statistics
-            processing_time = time.time() - start_time - total_pause_duration
-            actual_fps = processed_frame_count / processing_time if processing_time > 0 else 0
-            # Prepare statistics summary
-            stats = {
-                "frames_processed": processed_frame_count, # Report processed frames
-                "total_frames": total_frames, # Report total frames in video
-                "processing_time": processing_time,
-                "actual_fps": actual_fps, # FPS based on processed frames
-                "errors": processing_errors,
-                "detections": detection_counts,
-                "model_type": model_manager.model_type,
-                "model_device": model_device
-            }
-            # Update status when done
-            self.root.after(0, lambda: self.status_var.set("Processing complete"))
-            self.root.after(0, lambda s=stats: self.show_completion_stats(s))
-            # Reset processing state when done
-            self.root.after(0, lambda: setattr(self, 'processing_active', False))
-            # Reset button states
-            self.root.after(0, lambda: self._update_buttons(False))
-        except Exception as e:
-            print(f"Error in video processing thread: {e}")
-            traceback.print_exc()
-            self.root.after(0, lambda err=str(e): self.show_preview_message(
-                f"Error during video processing:\n{err}"))
-            self.root.after(0, lambda err=str(e): messagebox.showerror(
-                "Video Processing Error", f"An error occurred during video processing:\n{err}"))
-            # Reset processing state on error
-            self.root.after(0, lambda: setattr(self, 'processing_active', False))
-            # Reset button states on error
-            self.root.after(0, lambda: self._update_buttons(False))
-            
-    def _update_video_canvas(self, pil_img, frame_count, total_frames, model_type):
-        """Update the video canvas with a processed frame from the model (called from main thread)"""
-        try:
-            # Clear canvas
-            self.preview_canvas.delete("all")
-            # Convert PIL image to PhotoImage
-            self.processed_frame = ImageTk.PhotoImage(image=pil_img)
-            # Calculate position to center the image
-            x_center = self.preview_canvas.winfo_width() // 2
-            y_center = self.preview_canvas.winfo_height() // 2
-            # Create image on canvas
-            self.preview_canvas.create_image(
-                x_center, y_center,
-                image=self.processed_frame,
-                anchor=tk.CENTER
-            )
-            # Add frame counter overlay - adjust color
-            progress_text = f"Frame {frame_count}/{total_frames}"
-            self.preview_canvas.create_text(
-                10, 20, text=progress_text, 
-                fill="#CCCCCC", font=("Arial", 10), anchor=tk.W # Lighter color
-            )
-            # Add model type overlay - adjust color
-            self.preview_canvas.create_text(
-                10, 40, text=f"Model: {model_type}", 
-                fill="#CCCCCC", font=("Arial", 10), anchor=tk.W # Lighter color
-            )
-        except Exception as e:
-            print(f"Error updating video canvas: {e}")
-            
-    def _pause_processing(self):
-        """Pause or resume video processing"""
-        self.pause_processing = not self.pause_processing
-        self.pause_button.config(text="Resume" if self.pause_processing else "Pause")
-        
-    def _stop_processing(self):
-        """Stop video processing"""
-        self.stop_preview = True
-        self.pause_processing = False
-        self.status_var.set("Processing stopped")
-        # Reset processing state
-        self.processing_active = False
-        # Update buttons back to normal
-        self._update_buttons(False)
-        
-    def show_completion_stats(self, stats):
-        """Show a summary of processing statistics"""
-        try:
-            # Clear canvas
-            self.preview_canvas.delete("all")
-            # Calculate canvas dimensions for layout
-            canvas_width = self.preview_canvas.winfo_width() or 400
-            canvas_height = self.preview_canvas.winfo_height() or 300
-            # Background rectangle for better readability (adjust color for theme)
-            # Use a slightly lighter dark color that fits 'arc' theme
-            bg_color = "#383838" # Example color, adjust as needed
-            self.preview_canvas.create_rectangle(
-                20, 20, canvas_width - 20, canvas_height - 20,
-                fill=bg_color, outline="#555555", width=1
-            )
-            # Create a header with summary info (adjust color)
-            header_text = f"Processing Results: {stats['model_type'].upper()}"
-            header_color = "#77AADD" # Example color
-            self.preview_canvas.create_text(
-                canvas_width // 2, 40,
-                text=header_text,
-                fill=header_color, font=("Arial", 16, "bold"),
-                anchor=tk.CENTER
-            )
-            # Create processing statistics section (adjust color)
-            y_pos = 80
-            section_header_color = "#DDDDDD"
-            self.preview_canvas.create_text(
-                40, y_pos,
-                text="Processing Statistics:",
-                fill=section_header_color, font=("Arial", 12, "bold"),
-                anchor=tk.W
-            )
-            y_pos += 25
-            # Format duration as minutes:seconds
-            minutes = int(stats['processing_time'] // 60)
-            seconds = stats['processing_time'] % 60
-            duration_str = f"{minutes}m {seconds:.1f}s" if minutes > 0 else f"{seconds:.1f}s"
-            # Safely handle division by zero or missing stats for frame percentage
-            try:
-                frame_total = stats.get('total_frames', 0)
-                frame_processed = stats.get('frames_processed', 0)
-                frame_pct = (frame_processed / frame_total * 100) if frame_total > 0 else 0.0
-                frame_stat_str = (
-                    f"• Video frames: {frame_processed}/{frame_total}"
-                    + (f" ({frame_pct:.1f}%)" if frame_total > 0 else "")
-                )
-            except Exception:
-                frame_processed = stats.get('frames_processed', 0)
-                frame_total = stats.get('total_frames', 0)
-                frame_stat_str = f"• Video frames: {frame_processed}/{frame_total}"
-            proc_stats = [
-                frame_stat_str,
-                f"• Processing time: {duration_str}",
-                f"• Processing speed: {stats.get('actual_fps', 0):.1f} FPS",
-                f"• Hardware: {stats.get('model_device', 'N/A')}",
-                f"• Errors encountered: {stats.get('errors', 0)}"
-            ]
-            
-            stat_color = "#FFFFFF" # White for stats text
-            for stat in proc_stats:
-                self.preview_canvas.create_text(
-                    50, y_pos,
-                    text=stat,
-                    fill=stat_color, font=("Arial", 11),
-                    anchor=tk.W
-                )
-                y_pos += 22
-            # Create detections summary section if we have detections
-            if stats['detections']:
-                y_pos += 10
-                self.preview_canvas.create_text(
-                    40, y_pos,
-                    text="Detection Summary:",
-                    fill=section_header_color, font=("Arial", 12, "bold"),
-                    anchor=tk.W
-                )
-                y_pos += 25
-                # Sort detections by count (descending)
-                sorted_detections = sorted(
-                    stats['detections'].items(),
-                    key=lambda x: x[1],
-                    reverse=True
-                )
-                total_detections = sum(count for _, count in sorted_detections)
-                # Display top detections (limit to 10)
-                max_detections_to_show = 5 # Limit display for space
-                for i, (class_name, count) in enumerate(sorted_detections[:max_detections_to_show]):
-                    percentage = (count / total_detections * 100) if total_detections > 0 else 0
-                    # Use brighter colors suitable for dark background
-                    colors = ["#87CEFA", "#90EE90", "#FFD700", "#FFA07A", "#DDA0DD", 
-                             "#7FFFD4", "#FFB6C1", "#F0E68C", "#FF69B4", "#DEB887"]
-                    color = colors[i % len(colors)]
-                    self.preview_canvas.create_text(
-                        50, y_pos,
-                        text=f"• {class_name}: {count} ({percentage:.1f}%)",
-                        fill=color, font=("Arial", 11),
-                        anchor=tk.W
-                    )
-                    y_pos += 22
-                # If we have more than max_detections_to_show detection classes, show a summary for the rest
-                if len(sorted_detections) > max_detections_to_show:
-                    remaining = sum(count for _, count in sorted_detections[max_detections_to_show:])
-                    percentage = (remaining / total_detections * 100) if total_detections > 0 else 0
-                    self.preview_canvas.create_text(
-                        50, y_pos,
-                        text=f"• Other classes ({len(sorted_detections) - max_detections_to_show}): {remaining} ({percentage:.1f}%)",
-                        fill="#BBBBBB", font=("Arial", 11), # Lighter gray
-                        anchor=tk.W
-                    )
-                    y_pos += 22 # Add space after 'Other classes'
-            else:
-                y_pos += 20
-                self.preview_canvas.create_text(
-                    canvas_width // 2, y_pos,
-                    text="No detection data collected",
-                    fill="#BBBBBB", font=("Arial", 11), # Lighter gray
-                    anchor=tk.CENTER
-                )
-                y_pos += 22 # Add space even if no detections
-            # Add a footer with prompt to continue (adjust color)
-            footer_color = "#77AADD" # Same as header
-            self.preview_canvas.create_text(
-                canvas_width // 2, canvas_height - 30,
-                text="Processing complete. Select another video or run evaluation.",
-                fill=footer_color, font=("Arial", 10),
-                anchor=tk.CENTER
-            )
-        except Exception as e:
-            print(f"Error displaying completion stats: {e}")
-            self.show_preview_message(f"Error displaying completion statistics:\n{str(e)}")
-            
-    def show_evaluation_results(self, results):
-        """Show a summary of model evaluation results on the canvas"""
-        try:
-            # Clear canvas
-            self.preview_canvas.delete("all")
-            if not results:
-                self.show_preview_message("No evaluation results available.")
-                return
-            # Calculate canvas dimensions for layout
-            canvas_width = self.preview_canvas.winfo_width() or 600 # Use larger default
-            canvas_height = self.preview_canvas.winfo_height() or 500 # Use larger default
-            # Background rectangle
-            bg_color = "#383838"
-            self.preview_canvas.create_rectangle(
-                10, 10, canvas_width - 10, canvas_height - 10,
-                fill=bg_color, outline="#555555", width=1
-            )
-            # Header
-            header_text = "Model Evaluation Results"
-            header_color = "#77AADD"
-            self.preview_canvas.create_text(
-                canvas_width // 2, 30,
-                text=header_text,
-                fill=header_color, font=("Arial", 16, "bold"),
-                anchor=tk.CENTER
-            )
-            # Prepare data for display
-            model_types = list(results.keys())
-            metrics_to_display = {
-                "fps": "FPS",
-                "mean_inference_time": "Avg Inference (s)",
-                "total_detections": "Total Detections",
-                "unique_classes_detected": "Unique Classes",
-                "AP_IoU=0.50:0.95": "mAP [0.5:0.95]",
-                "AP_IoU=0.50": "AP@0.50",
-                "successful_inferences": "Success %" # Note: This reflects processing success, not detection accuracy.
-            }
-            data = {"Metric": list(metrics_to_display.values())}
-            for model in model_types:
-                model_data = []
-                metrics = results.get(model, {})
-                coco_metrics = metrics.get("coco_metrics", {}) or {} # Handle None
-                total_images = metrics.get("total_images", 1) # Avoid division by zero
-                for key, display_name in metrics_to_display.items():
-                    value = None
-                    if key in metrics:
-                        value = metrics[key]
-                    elif key in coco_metrics:
-                        value = coco_metrics[key]
-                    # Format values
-                    if value is None:
-                        formatted_value = "N/A"
-                    elif key == "successful_inferences":
-                        # Clarification: This metric indicates the percentage of images 
-                        # processed without runtime errors, not detection accuracy.
-                        success_count = metrics.get("successful_inferences", 0)
-                        formatted_value = f"{(success_count / total_images * 100):.1f}%" if total_images > 0 else "0.0%"
-                    elif isinstance(value, float):
-                        if key == "fps":
-                            formatted_value = f"{value:.1f}"
-                        elif "time" in key:
-                            formatted_value = f"{value:.3f}"
-                        else: # mAP/AP
-                            formatted_value = f"{value:.3f}"
-                    else:
-                        formatted_value = str(value)
-                    model_data.append(formatted_value)
-                data[model.upper()] = model_data
-            # Use pandas to create a string representation of the table
-            try:
-                df = pd.DataFrame(data)
-                table_str = df.to_string(index=False, justify='center')
-            except ImportError:
-                # Fallback if pandas is not available (less neat)
-                table_str = "Pandas not found. Cannot display table.\n\n"
-                for model in model_types:
-                    table_str += f"--- {model.upper()} ---\n"
-                    for key, display_name in metrics_to_display.items():
-                         value = results.get(model, {}).get(key) or \
-                                 (results.get(model, {}).get("coco_metrics", {}) or {}).get(key)
-                         table_str += f"{display_name}: {value}\n"
-                    table_str += "\n"
-            # Display the table string on the canvas
-            # Use a fixed-width font for better table alignment
-            self.preview_canvas.create_text(
-                canvas_width // 2,
-                70, # Start below header
-                text=table_str,
-                fill="#FFFFFF", font=("Courier New", 10), # Fixed-width font
-                anchor=tk.N, # Anchor to top-center
-                justify=tk.LEFT # Left justify lines
-            )
-            
-            # Determine best model based on a simplified scoring
-            best_model = None
-            best_score = -1
-            
-            for model in model_types:
-                # Calculate a simple weighted score based on key metrics
-                metrics = results.get(model, {})
-                coco_metrics = metrics.get("coco_metrics", {}) or {}
-                
-                # Get metrics with fallbacks to zero
-                fps = metrics.get("fps", 0)
-                map_50 = coco_metrics.get("AP_IoU=0.50", 0)
-                unique_classes = metrics.get("unique_classes_detected", 0)
-                
-                # Simple weighted score - higher is better
-                score = (0.4 * map_50) + (0.3 * fps / 30) + (0.3 * unique_classes / 20)
-                
-                if score > best_score:
-                    best_score = score
-                    best_model = model
-            
-            # Create the "Create Demo Video" button
-            button_y = canvas_height - 80
-            
-            # Add best model information
-            if best_model:
-                best_model_text = f"Best Model: {best_model.upper()}"
-                self.preview_canvas.create_text(
-                    canvas_width // 2, button_y - 40,
-                    text=best_model_text,
-                    fill="#77AADD", font=("Arial", 14, "bold"),
-                    anchor=tk.CENTER
-                )
-            
-            # Create a background rectangle for the button
-            btn_width = 200
-            btn_height = 40
-            btn_x = (canvas_width - btn_width) // 2
-            
-            # Create a nice clickable button look
-            button_rect = self.preview_canvas.create_rectangle(
-                btn_x, button_y,
-                btn_x + btn_width, button_y + btn_height,
-                fill="#4CAF50", outline="#2E7D32", width=2,
-                tags=("demo_btn",)
-            )
-            
-            button_text = self.preview_canvas.create_text(
-                canvas_width // 2, button_y + (btn_height // 2),
-                text="Create Demo Video",
-                fill="white", font=("Arial", 12, "bold"),
-                tags=("demo_btn",)
-            )
-            
-            # Store the best model for the button click handler
-            self.preview_canvas.best_model = best_model
-            
-            # Bind click events to the button
-            self.preview_canvas.tag_bind("demo_btn", "<Button-1>", 
-                                       lambda event: self.create_demo_video_from_evaluation(best_model))
-            
-            # Add hover effect (cursor change)
-            self.preview_canvas.tag_bind("demo_btn", "<Enter>", 
-                                       lambda event: self.preview_canvas.config(cursor="hand2"))
-            self.preview_canvas.tag_bind("demo_btn", "<Leave>", 
-                                       lambda event: self.preview_canvas.config(cursor=""))
-            
-            # Add footer
-            footer_color = "#AAAAAA"
-            self.preview_canvas.create_text(
-                canvas_width // 2, canvas_height - 20,
-                text="Evaluation complete. Detailed reports in 'inference/results'.",
-                fill=footer_color, font=("Arial", 10),
-                anchor=tk.CENTER
-            )
-        except Exception as e:
-            print(f"Error displaying evaluation results: {e}")
-            self.show_preview_message(f"Error displaying evaluation results:\n{str(e)}")
-            
-    def create_demo_video_from_evaluation(self, model_type):
-        """Create a demo video using the best model from evaluation"""
-        if not model_type:
-            messagebox.showerror("Error", "No model selected for demo creation")
-            return
-            
-        try:
-            from inference.create_demo_video import list_available_videos, create_demo_video
-            
-            # First check if we have sample videos
-            videos = list_available_videos()
-            if not videos:
-                messagebox.showerror("Error", "No sample videos available for demo creation")
-                return
-                
-            # Show selection dialog
-            dialog = tk.Toplevel(self.root)
-            dialog.title("Select Video for Demo")
-            dialog.geometry("500x400")
-            dialog.transient(self.root)
-            dialog.grab_set()  # Make modal
-            dialog.resizable(False, False)
-            
-            # Add explanation text
-            ttk.Label(dialog, text=f"Select a video to create a demo using the {model_type.upper()} model:", 
-                     wraplength=480).pack(pady=(15, 5), padx=20)
-            
-            # Create listbox with scrollbar for video selection
-            frame = ttk.Frame(dialog)
-            frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=10)
-            
-            scrollbar = ttk.Scrollbar(frame)
-            scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-            
-            listbox = tk.Listbox(frame, yscrollcommand=scrollbar.set, font=("Arial", 11), height=10)
-            listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-            
-            scrollbar.config(command=listbox.yview)
-            
-            # Add video options
-            for video in videos:
-                listbox.insert(tk.END, video.name)
-                
-            # Add selection callback
-            def on_video_selected():
-                selection = listbox.curselection()
-                if not selection:
-                    messagebox.showerror("Error", "Please select a video")
-                    return
-                
-                video_path = videos[selection[0]]
-                dialog.destroy()
-                
-                # Show loading message with progressbar
-                self.status_var.set(f"Creating demo video with {model_type.upper()}...")
-                
-                # Create progress display in preview panel
-                self.show_video_creation_progress(model_type)
-                self.root.update()
-                
-                # Run video creation in background thread to keep UI responsive
-                def create_video_thread():
-                    try:
-                        # Define a callback to update the progress bar
-                        def progress_callback(current_frame, total_frames):
-                            progress = (current_frame / total_frames) * 100 if total_frames > 0 else 0
-                            # Update progress in main thread
-                            self.root.after(0, lambda p=progress: self.update_video_creation_progress(p))
-                        
-                        # Pass the callback to create_demo_video
-                        output_path = create_demo_video(model_type, video_path, progress_callback=progress_callback)
-                        
-                        # Update UI from main thread
-                        self.root.after(0, lambda: self.show_demo_video_complete(output_path))
-                    except Exception as e:
-                        print(f"Error creating demo video: {e}")
-                        self.root.after(0, lambda: messagebox.showerror("Error", f"Failed to create demo video: {e}"))
-                        self.root.after(0, lambda: self.status_var.set("Demo video creation failed"))
-                
-                threading.Thread(target=create_video_thread, daemon=True).start()
-            
-            # Button frame
-            btn_frame = ttk.Frame(dialog)
-            btn_frame.pack(fill=tk.X, padx=20, pady=15)
-            
-            # Cancel button
-            ttk.Button(btn_frame, text="Cancel", command=dialog.destroy).pack(side=tk.LEFT, padx=5)
-            
-            # Create button
-            ttk.Button(btn_frame, text="Create Demo", command=on_video_selected).pack(side=tk.RIGHT, padx=5)
-            
-            # Center dialog on parent window
-            dialog.update_idletasks()
-            x = self.root.winfo_x() + (self.root.winfo_width() - dialog.winfo_width()) // 2
-            y = self.root.winfo_y() + (self.root.winfo_height() - dialog.winfo_height()) // 2
-            dialog.geometry(f"+{x}+{y}")
-            
-        except Exception as e:
-            print(f"Error setting up demo video creation: {e}")
-            messagebox.showerror("Error", f"Failed to set up demo video creation: {e}")
-    
-    def show_video_creation_progress(self, model_type):
-        """Display a progress bar for video creation in the preview panel"""
-        # Clear canvas
-        self.preview_canvas.delete("all")
-        canvas_width = self.preview_canvas.winfo_width() or 600
-        canvas_height = self.preview_canvas.winfo_height() or 500
-        
-        # Drawing background
-        bg_color = "#383838"
-        self.preview_canvas.create_rectangle(
-            10, 10, canvas_width - 10, canvas_height - 10,
-            fill=bg_color, outline="#555555", width=1
-        )
-        
-        # Add message
-        self.preview_canvas.create_text(
-            canvas_width // 2, canvas_height // 2 - 50,
-            text=f"Creating demo video with {model_type.upper()}\nPlease wait...",
-            fill="#FFFFFF", font=("Arial", 14),
-            justify=tk.CENTER
-        )
-        
-        # Create progress bar background
-        bar_width = int(canvas_width * 0.7)  # 70% of canvas width
-        bar_height = 25
-        bar_x = (canvas_width - bar_width) // 2
-        bar_y = canvas_height // 2 + 20
-        
-        self.preview_canvas.create_rectangle(
-            bar_x, bar_y,
-            bar_x + bar_width, bar_y + bar_height,
-            fill="#2B2B2B", outline="#AAAAAA"
-        )
-        
-        # Store references for updating
-        self.progress_bar_coords = (bar_x, bar_y, bar_width, bar_height)
-        self.progress_bar = self.preview_canvas.create_rectangle(
-            bar_x, bar_y,
-            bar_x, bar_y + bar_height,  # Zero width initially
-            fill="#4CAF50", outline=""
-        )
-        
-        # Create text to show percentage
-        self.progress_text = self.preview_canvas.create_text(
-            canvas_width // 2, bar_y + bar_height + 20,
-            text="0%",
-            fill="#FFFFFF", font=("Arial", 12),
-            anchor=tk.CENTER
-        )
-    
-    def update_video_creation_progress(self, percentage):
-        """Update the progress bar in the preview panel"""
-        if hasattr(self, 'progress_bar') and self.progress_bar:
-            # Update progress bar width
-            bar_x, bar_y, bar_width, bar_height = self.progress_bar_coords
-            progress_width = int(bar_width * percentage / 100)
-            
-            # Update rectangle
-            self.preview_canvas.coords(
-                self.progress_bar,
-                bar_x, bar_y,
-                bar_x + progress_width, bar_y + bar_height
-            )
-            
-            # Update text
-            self.preview_canvas.itemconfig(
-                self.progress_text, 
-                text=f"{percentage:.1f}%"
-            )
-            
-            # Update status bar
-            self.status_var.set(f"Creating demo video: {percentage:.1f}% complete")
-            
-            # Force GUI update
-            self.root.update_idletasks()
-            
-    def show_demo_video_complete(self, output_path):
-        """Show the completion message with an option to play the video inline"""
-        if not output_path:
-            self.status_var.set("Demo video creation failed")
-            self.show_preview_message("Failed to create demo video")
-            return
-            
-        self.status_var.set("Demo video creation complete")
-        
-        # Clear the canvas
-        self.preview_canvas.delete("all")
-        canvas_width = self.preview_canvas.winfo_width() or 600
-        canvas_height = self.preview_canvas.winfo_height() or 500
-        
-        # Background
-        bg_color = "#383838"
-        self.preview_canvas.create_rectangle(
-            10, 10, canvas_width - 10, canvas_height - 10,
-            fill=bg_color, outline="#555555", width=1
-        )
-        
-        # Header
-        header_text = "Demo Video Created Successfully!"
-        header_color = "#77AADD"
-        self.preview_canvas.create_text(
-            canvas_width // 2, 40,
-            text=header_text,
-            fill=header_color, font=("Arial", 16, "bold"),
-            anchor=tk.CENTER
-        )
-        
-        # Display video info
-        self.preview_canvas.create_text(
-            canvas_width // 2, 80,
-            text=f"Video saved to:\n{output_path}",
-            fill="#FFFFFF", font=("Arial", 11),
-            anchor=tk.CENTER,
-            justify=tk.CENTER
-        )
-        
-        # Add buttons to play the video
-        btn_width = 150
-        btn_height = 40
-        btn_spacing = 20
-        
-        # Play button
-        play_btn_x = (canvas_width - btn_width*2 - btn_spacing) // 2
-        play_btn_y = canvas_height // 2 - btn_height // 2
-        
-        self.preview_canvas.create_rectangle(
-            play_btn_x, play_btn_y,
-            play_btn_x + btn_width, play_btn_y + btn_height,
-            fill="#4CAF50", outline="#2E7D32", width=2,
-            tags=("play_btn",)
-        )
-        
-        self.preview_canvas.create_text(
-            play_btn_x + btn_width // 2, play_btn_y + btn_height // 2,
-            text="Play in App",
-            fill="#FFFFFF", font=("Arial", 12, "bold"),
-            tags=("play_btn",)
-        )
-        
-        # Open button
-        open_btn_x = play_btn_x + btn_width + btn_spacing
-        
-        self.preview_canvas.create_rectangle(
-            open_btn_x, play_btn_y,
-            open_btn_x + btn_width, play_btn_y + btn_height,
-            fill="#2196F3", outline="#0D47A1", width=2,
-            tags=("open_btn",)
-        )
-        
-        self.preview_canvas.create_text(
-            open_btn_x + btn_width // 2, play_btn_y + btn_height // 2,
-            text="Open File",
-            fill="#FFFFFF", font=("Arial", 12, "bold"),
-            tags=("open_btn",)
-        )
-        
-        # Store video path for button callbacks
-        self.preview_canvas.video_path = output_path
-        
-        # Bind click events to the buttons
-        self.preview_canvas.tag_bind("play_btn", "<Button-1>", 
-                                   lambda event: self.play_video_in_preview(output_path))
-        self.preview_canvas.tag_bind("open_btn", "<Button-1>", 
-                                   lambda event: self.open_video_file(output_path))
-        
-        # Add hover effects
-        for tag in ["play_btn", "open_btn"]:
-            self.preview_canvas.tag_bind(tag, "<Enter>", 
-                                       lambda event: self.preview_canvas.config(cursor="hand2"))
-            self.preview_canvas.tag_bind(tag, "<Leave>", 
-                                       lambda event: self.preview_canvas.config(cursor=""))
 
-    def play_video_in_preview(self, video_path, is_preview=False, autoplay=False):
-        """Play the created video in the preview panel"""
-        title = "Previewing" if is_preview else "Playing"
-        self.status_var.set(f"{title} video: {os.path.basename(video_path)}")
-        
-        # Create a thread to play the video in the preview panel
-        self.stop_preview = True  # Stop any existing preview
-        if hasattr(self, 'video_thread') and self.video_thread and self.video_thread.is_alive():
-            self.video_thread.join(timeout=1.0)
-        self.stop_preview = False
-        
-        self.video_thread = threading.Thread(
-            target=self._play_video_thread,
-            args=(video_path, is_preview, autoplay),
-            daemon=True
-        )
-        self.video_thread.start()
-        
-    def _play_video_thread(self, video_path, is_preview=False, autoplay=False):
-        """Thread to play video in preview panel"""
-        try:
-            # Open the video file
-            cap = cv2.VideoCapture(video_path)
-            if not cap.isOpened():
-                self.show_preview_message(f"Cannot open video:\n{video_path}")
-                return
-            
-            # Get video properties
-            width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-            height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-            fps = cap.get(cv2.CAP_PROP_FPS)
-            total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-            
-            # Calculate dimensions to fit in the canvas
-            canvas_width = self.preview_canvas.winfo_width() or 600
-            canvas_height = self.preview_canvas.winfo_height() or 500
-            
-            ratio = min(canvas_width / width, canvas_height / height) * 0.9
-            display_width = int(width * ratio)
-            display_height = int(height * ratio)
-            
-            # Create playback controls on the canvas
-            self.root.after(0, self._create_video_controls, total_frames)
-            
-            # Frame timing
-            target_frame_time = 1.0 / fps if fps > 0 else 0.033  # Default to ~30fps
-            
-            # Playback state
-            frame_idx = 0
-            playing = True
-            
-            while not self.stop_preview:
-                if not playing:
-                    time.sleep(0.1)  # Reduce CPU usage when paused
-                    continue
-                    
-                # Seek to specific frame if needed
-                if hasattr(self, 'seek_to_frame') and self.seek_to_frame is not None:
-                    cap.set(cv2.CAP_PROP_POS_FRAMES, self.seek_to_frame)
-                    frame_idx = self.seek_to_frame
-                    self.seek_to_frame = None
-                
-                # Read frame
-                ret, frame = cap.read()
-                if not ret:
-                    # Loop back to beginning
-                    cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
-                    frame_idx = 0
-                    continue
-                    
-                frame_idx += 1
-                
-                # Update progress bar
-                self.root.after(0, self._update_video_progress, frame_idx, total_frames)
-                
-                # Resize and convert frame
-                frame_resized = cv2.resize(frame, (display_width, display_height))
-                frame_rgb = cv2.cvtColor(frame_resized, cv2.COLOR_BGR2RGB)
-                
-                # Convert to PIL image
-                pil_img = Image.fromarray(frame_rgb)
-                
-                # Update canvas on main thread
-                self.root.after(0, self._update_video_display, pil_img)
-                
-                # Control playback speed
-                time.sleep(target_frame_time)
-                    
-            # Clean up
-            cap.release()
-            self.root.after(0, self._remove_video_controls)
-            print("Video playback stopped.")
-            
-        except Exception as e:
-            print(f"Error playing video: {e}")
-            self.root.after(0, lambda err=str(e): self.show_preview_message(
-                f"Error playing video:\n{err}"))
-            
     def _create_video_controls(self, total_frames):
-        """Create video playback controls on the canvas"""
+        """Create video playback controls on the canvas (simplified to just show progress)"""
         # Clean up any existing controls
         self._remove_video_controls()
         
@@ -2378,7 +1269,7 @@ class GraphicalGUI:
         
         # Create semi-transparent background for controls
         control_bg = self.preview_canvas.create_rectangle(
-            0, canvas_height - 50, 
+            0, canvas_height - 40, 
             canvas_width, canvas_height,
             fill="#222222", stipple="gray50",
             tags="video_controls"
@@ -2400,28 +1291,13 @@ class GraphicalGUI:
             tags="video_controls"
         )
         
-        # Add play/pause toggle button
-        play_btn_size = 30
-        play_btn_x = 20
-        play_btn_y = canvas_height - 55
-        
-        # Play/pause button (circle with triangle/bars)
-        self.play_pause_btn = self.preview_canvas.create_oval(
-            play_btn_x, play_btn_y,
-            play_btn_x + play_btn_size, play_btn_y + play_btn_size,
-            fill="#555555", outline="#888888",
-            tags=("video_controls", "play_pause_btn")
+        # Add video preview info text
+        self.preview_canvas.create_text(
+            canvas_width // 2, canvas_height - 35,
+            text="Click progress bar to seek",
+            fill="white", font=("Arial", 9),
+            tags="video_controls"
         )
-        
-        # Initial button state - depends on video_playing
-        if not hasattr(self, 'video_playing'):
-            self.video_playing = False
-            
-        self._update_play_pause_button()
-        
-        # Bind play/pause button click
-        self.preview_canvas.tag_bind("play_pause_btn", "<Button-1>", 
-                                   lambda event: self._toggle_playback())
         
         # Make progress bar clickable for seeking
         self.preview_canvas.tag_bind(progress_bg, "<Button-1>", 
@@ -2435,63 +1311,13 @@ class GraphicalGUI:
             'progress_top': canvas_height - 30,
             'progress_bottom': canvas_height - 20
         }
-        
+
     def _toggle_playback(self):
-        """Toggle video playback between play and pause states"""
-        self.video_playing = not self.video_playing
-        self._update_play_pause_button()
-        
-    def _update_play_pause_button(self):
-        """Update the play/pause button appearance based on state"""
-        if not hasattr(self, 'play_pause_btn'):
-            return
-            
-        # Remove existing play/pause icon
-        for item in self.preview_canvas.find_withtag("play_pause_icon"):
-            self.preview_canvas.delete(item)
-        
-        # Get button coordinates
-        coords = self.preview_canvas.coords(self.play_pause_btn)
-        if not coords or len(coords) != 4:
-            return
-            
-        # Calculate center and size
-        x1, y1, x2, y2 = coords
-        center_x = (x1 + x2) / 2
-        center_y = (y1 + y2) / 2
-        size = (x2 - x1) * 0.3  # Icon size relative to button
-        
-        # Draw play or pause icon
-        if self.video_playing:
-            # Pause icon (two vertical bars)
-            bar_width = size * 0.5
-            spacing = size * 0.5
-            
-            # Left bar
-            self.preview_canvas.create_rectangle(
-                center_x - spacing - bar_width, center_y - size,
-                center_x - spacing, center_y + size,
-                fill="white", outline="",
-                tags=("video_controls", "play_pause_icon")
-            )
-            
-            # Right bar
-            self.preview_canvas.create_rectangle(
-                center_x + spacing, center_y - size,
-                center_x + spacing + bar_width, center_y + size,
-                fill="white", outline="",
-                tags=("video_controls", "play_pause_icon")
-            )
-        else:
-            # Play icon (triangle)
-            self.preview_canvas.create_polygon(
-                center_x - size, center_y - size,  # Top left
-                center_x - size, center_y + size,  # Bottom left
-                center_x + size * 1.5, center_y,   # Right point
-                fill="white", outline="",
-                tags=("video_controls", "play_pause_icon")
-            )
-        
+        """
+        This method is kept for compatibility but no longer needed for preview
+        """
+        pass  # Do nothing, preview always plays
+
     def _update_video_progress(self, current_frame, total_frames):
         """Update the video progress bar"""
         if hasattr(self, 'video_control_dims'):
@@ -2902,6 +1728,11 @@ class GraphicalGUI:
         if hasattr(self, 'show_advanced_var') and self.show_advanced_var.get():
             if hasattr(self, 'custom_model_path'):
                 self.custom_model_path.set(DEFAULT_MODELS.get(model_type, ""))
+        
+    def pause_processing(self):
+        """Pause or resume video processing"""
+        self.pause_processing = not self.pause_processing
+        self.pause_button.config(text="Resume" if self.pause_processing else "Pause")
         
 # Removed validate_model function as initialization handles this now
 
