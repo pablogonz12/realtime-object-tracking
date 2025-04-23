@@ -1,6 +1,6 @@
 """
 Consolidated Computer Vision Models
-This file combines model wrappers (Faster R-CNN, RT-DETR, YOLO-Seg) into a single file
+This file combines model wrappers (Mask R-CNN, SAM, YOLO-Seg) into a single file
 for easier maintenance and use.
 """
 
@@ -38,12 +38,15 @@ MODELS_DIR.mkdir(parents=True, exist_ok=True) # Ensure directory exists
 DEFAULT_MODEL_PATHS = {
     'faster-rcnn': MODELS_DIR / 'fasterrcnn_resnet50_fpn.pt',
     'rtdetr': MODELS_DIR / 'rtdetr-l.pt',
-    'yolo-seg': MODELS_DIR / 'yolov8n-seg.pt' # Added YOLO Segmentation model
+    'yolo-seg': MODELS_DIR / 'yolov8n-seg.pt', # Added YOLO Segmentation model
+    'mask-rcnn': MODELS_DIR / 'maskrcnn_resnet50_fpn.pt',
+    'sam': MODELS_DIR / 'sam_vit_h.pt'
 }
 
 MODEL_URLS = {
     "rtdetr-l.pt": "https://github.com/ultralytics/assets/releases/download/v0.0.0/rtdetr-l.pt",
-    "yolov8n-seg.pt": "https://github.com/ultralytics/assets/releases/download/v0.0.0/yolov8n-seg.pt" # Added YOLO-Seg URL
+    "yolov8n-seg.pt": "https://github.com/ultralytics/assets/releases/download/v0.0.0/yolov8n-seg.pt", # Added YOLO-Seg URL
+    "sam_vit_h.pt": "https://dl.fbaipublicfiles.com/segment_anything/sam_vit_h_4b8939.pth"
 }
 
 # --- Helper Function for Downloading ---
@@ -54,8 +57,8 @@ def _download_model_if_needed(model_path: Path):
         return True
 
     model_name = model_path.name
-    # Skip download for Faster R-CNN as we'll use torchvision's pretrained model
-    if model_name == 'fasterrcnn_resnet50_fpn.pt':
+    # Skip download for Mask R-CNN as we'll use torchvision's pretrained model
+    if model_name == 'maskrcnn_resnet50_fpn.pt':
         print(f"Note: {model_name} will be loaded from torchvision, not downloaded.")
         # Create an empty file as a placeholder
         open(model_path, 'w').close()
@@ -98,150 +101,6 @@ def _download_model_if_needed(model_path: Path):
     except Exception as e:
         print(f"\nAn unexpected error occurred during download: {e}")
         return False
-
-
-# --- Faster R-CNN Wrapper ---
-class FasterRCNNWrapper:
-    """Wrapper for Faster R-CNN model inference using torchvision."""
-    
-    def __init__(self, model_path=None):
-        """
-        Initializes the Faster R-CNN model wrapper.
-        
-        Args:
-            model_path (str or Path, optional): Path is ignored as we use pretrained torchvision model.
-        """
-        print("Initializing FasterRCNNWrapper")
-        
-        # Determine device (cuda or cpu)
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        print(f"Using device: {self.device}")
-        
-        try:
-            print("Loading Faster R-CNN model from torchvision...")
-            # Load the pretrained model - use weights='DEFAULT' for newer torchvision, use pretrained=True for older versions
-            try:
-                self.model = torchvision.models.detection.fasterrcnn_resnet50_fpn(weights='DEFAULT')
-            except TypeError:
-                # Fall back to older torchvision API
-                self.model = torchvision.models.detection.fasterrcnn_resnet50_fpn(pretrained=True)
-            
-            # Set model to evaluation mode
-            self.model.eval()
-            # Move model to the correct device
-            self.model.to(self.device)
-            # Store COCO class names
-            self.class_names = COCO_CLASSES
-            print("Faster R-CNN model loaded successfully.")
-        except Exception as e:
-            print(f"Error loading Faster R-CNN model: {e}")
-            import traceback
-            traceback.print_exc()
-            self.model = None
-
-    def predict(self, frame: np.ndarray):
-        """
-        Performs object detection on a single frame.
-        
-        Args:
-            frame (np.ndarray): Input video frame (BGR format).
-            
-        Returns:
-            tuple: A tuple containing:
-                - detections (list): List of detected objects (dict with 'box', 'class_id', 'class_name', 'score').
-                - segmentations (list): Empty list (Faster R-CNN doesn't provide segmentation).
-                - annotated_frame (np.ndarray): Frame with visualizations drawn.
-        """
-        if self.model is None:
-            print("Warning: Faster R-CNN model not loaded. Returning empty results.")
-            annotated_frame = frame.copy()
-            cv2.putText(annotated_frame, "Faster R-CNN Model Not Loaded", (50, 50),
-                        cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
-            return [], [], annotated_frame
-            
-        try:
-            # Start timing
-            start_time = time.time()
-            
-            # Preprocess the input frame
-            # Convert BGR (OpenCV) to RGB
-            rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            
-            # Convert to a PyTorch tensor
-            img_tensor = F.to_tensor(rgb_frame)
-            
-            # Move to the correct device and add batch dimension
-            img_tensor = img_tensor.to(self.device).unsqueeze(0)
-            
-            preprocess_time = time.time() - start_time
-            inference_start = time.time()
-            
-            # Perform inference
-            with torch.no_grad():
-                predictions = self.model(img_tensor)
-                
-            inference_time = time.time() - inference_start
-            postprocess_start = time.time()
-            
-            # Process predictions
-            boxes = predictions[0]['boxes'].cpu().numpy()
-            scores = predictions[0]['scores'].cpu().numpy()
-            labels = predictions[0]['labels'].cpu().numpy()
-            
-            # Filter predictions based on confidence threshold
-            confidence_threshold = 0.5
-            confident_detections = scores >= confidence_threshold
-            
-            # Format detections
-            detections = []
-            annotated_frame = frame.copy()
-            
-            for idx in range(len(boxes)):
-                if scores[idx] >= confidence_threshold:
-                    # Extract coordinates
-                    x1, y1, x2, y2 = boxes[idx].astype(int)
-                    class_id = labels[idx].item()
-                    score = scores[idx].item()
-                    
-                    # Get class name (subtract 1 if your model uses 0 as background)
-                    class_name = self.class_names[class_id] if class_id < len(self.class_names) else f"Unknown {class_id}"
-                    
-                    # Add to detections list
-                    detections.append({
-                        "box": [x1, y1, x2, y2],
-                        "class_id": class_id,
-                        "class_name": class_name,
-                        "score": score
-                    })
-                    
-                    # Annotate frame
-                    cv2.rectangle(annotated_frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
-                    label_text = f"{class_name}: {score:.2f}"
-                    cv2.putText(annotated_frame, label_text, (x1, y1 - 10),
-                               cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
-            
-            postprocess_time = time.time() - postprocess_start
-            total_time = time.time() - start_time
-            
-            # Display timing information on frame and in console
-            cv2.putText(annotated_frame, f"FPS: {1/total_time:.1f}", (10, 30),
-                       cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
-            
-            # Add detailed timing report to console
-            print(f"Faster R-CNN timing: Total={total_time:.3f}s (FPS: {1/total_time:.1f}) | " 
-                  f"Preprocess={preprocess_time:.3f}s | Inference={inference_time:.3f}s | "
-                  f"Postprocess={postprocess_time:.3f}s | Detections={len(detections)}")
-            
-            return detections, [], annotated_frame
-            
-        except Exception as e:
-            print(f"Error during Faster R-CNN prediction: {e}")
-            import traceback
-            traceback.print_exc()
-            annotated_frame = frame.copy()
-            cv2.putText(annotated_frame, "Faster R-CNN Prediction Error", (50, 50),
-                        cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
-            return [], [], annotated_frame
 
 
 # --- YOLO Wrapper ---
@@ -381,104 +240,128 @@ class YOLOWrapper:
             return [], [], annotated_frame
 
 
-# --- RT-DETR Wrapper ---
-class RTDETRWrapper:
-    """Wrapper for RT-DETR model inference using the Ultralytics library."""
-
-    def __init__(self, model_path=DEFAULT_MODEL_PATHS['rtdetr'], config_path=None):
+# --- Mask R-CNN Wrapper ---
+class MaskRCNNWrapper:
+    """Wrapper for Mask R-CNN model inference using torchvision."""
+    
+    def __init__(self, model_path=None):
         """
-        Initializes the RT-DETR model wrapper.
-
+        Initializes the Mask R-CNN model wrapper.
+        
         Args:
-            model_path (str or Path): Path to the RT-DETR model weights file.
-            config_path (str, optional): Path to the configuration file (usually not needed with Ultralytics).
+            model_path (str or Path, optional): Path is ignored as we use pretrained torchvision model.
         """
-        self.model_path = Path(model_path)
-        print(f"Initializing RTDETRWrapper with model_path: {self.model_path}")
-
-        # Download model if it doesn't exist and is a default model
-        if self.model_path == DEFAULT_MODEL_PATHS['rtdetr']:
-            if not _download_model_if_needed(self.model_path):
-                print(f"Error: RT-DETR model file {self.model_path} could not be found or downloaded.")
-                self.model = None
-                return
-        elif not self.model_path.exists():
-             print(f"Error: Custom RT-DETR model file not found: {self.model_path}")
-             self.model = None
-             return
-
+        print("Initializing MaskRCNNWrapper")
+        
+        # Determine device (cuda or cpu)
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        print(f"Using device: {self.device}")
+        
         try:
-            # RT-DETR is now integrated into Ultralytics
-            from ultralytics import RTDETR # Import here
-            print("Loading RT-DETR model...")
-            self.model = RTDETR(self.model_path)
-            # Perform a dummy inference to check if model loaded correctly (optional)
-            # _ = self.model(np.zeros((64, 64, 3), dtype=np.uint8))
-            print("RT-DETR model loaded successfully.")
-        except ImportError:
-             print("Error: 'ultralytics' library not found. Please install it (`pip install ultralytics`)")
-             self.model = None
+            print("Loading Mask R-CNN model from torchvision...")
+            # Load the pretrained model - use weights='DEFAULT' for newer torchvision, use pretrained=True for older versions
+            try:
+                self.model = torchvision.models.detection.maskrcnn_resnet50_fpn(weights='DEFAULT')
+            except TypeError:
+                # Fall back to older torchvision API
+                self.model = torchvision.models.detection.maskrcnn_resnet50_fpn(pretrained=True)
+            
+            # Set model to evaluation mode
+            self.model.eval()
+            # Move model to the correct device
+            self.model.to(self.device)
+            # Store COCO class names
+            self.class_names = COCO_CLASSES
+            print("Mask R-CNN model loaded successfully.")
         except Exception as e:
-            print(f"Error loading RT-DETR model from {self.model_path}: {e}")
+            print(f"Error loading Mask R-CNN model: {e}")
             import traceback
             traceback.print_exc()
             self.model = None
 
     def predict(self, frame: np.ndarray):
         """
-        Performs object detection on a single frame.
-
+        Performs instance segmentation on a single frame.
+        
         Args:
             frame (np.ndarray): Input video frame (BGR format).
-
+            
         Returns:
             tuple: A tuple containing:
                 - detections (list): List of detected objects (dict with 'box', 'class_id', 'class_name', 'score').
-                - segmentations (list): Empty list (RT-DETR is primarily detection).
+                - segmentations (list): List of segmentation masks (binary masks for each detection).
                 - annotated_frame (np.ndarray): Frame with visualizations drawn.
         """
         if self.model is None:
-            print("Warning: RT-DETR model not loaded. Returning empty results.")
+            print("Warning: Mask R-CNN model not loaded. Returning empty results.")
             annotated_frame = frame.copy()
-            cv2.putText(annotated_frame, "RT-DETR Model Not Loaded", (50, 80),
+            cv2.putText(annotated_frame, "Mask R-CNN Model Not Loaded", (50, 50),
                         cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
             return [], [], annotated_frame
-
+            
         try:
             # Start timing
             start_time = time.time()
             
-            # Perform prediction
-            results = self.model(frame, verbose=False)
+            # Preprocess the input frame
+            # Convert BGR (OpenCV) to RGB
+            rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             
-            inference_time = time.time() - start_time
+            # Convert to a PyTorch tensor
+            img_tensor = F.to_tensor(rgb_frame)
+            
+            # Move to the correct device and add batch dimension
+            img_tensor = img_tensor.to(self.device).unsqueeze(0)
+            
+            preprocess_time = time.time() - start_time
+            inference_start = time.time()
+            
+            # Perform inference
+            with torch.no_grad():
+                predictions = self.model(img_tensor)
+                
+            inference_time = time.time() - inference_start
             postprocess_start = time.time()
             
-            detections = []
-            segmentations = [] # RT-DETR typically doesn't output segmentations
+            # Process predictions
+            boxes = predictions[0]['boxes'].cpu().numpy()
+            scores = predictions[0]['scores'].cpu().numpy()
+            labels = predictions[0]['labels'].cpu().numpy()
+            masks = predictions[0]['masks'].cpu().numpy()
             
-            # Create a copy of the frame for annotation
+            # Filter predictions based on confidence threshold
+            confidence_threshold = 0.5
+            confident_indices = scores >= confidence_threshold
+            
+            # Format detections and segmentations
+            detections = []
+            segmentations = []
             annotated_frame = frame.copy()
             
-            # Extract detection details
-            for result in results:
-                boxes = result.boxes
-                names = result.names  # Class names mapping
-                
-                for i in range(len(boxes)):
-                    box = boxes[i]
-                    x1, y1, x2, y2 = map(int, box.xyxy[0])
-                    class_id = int(box.cls[0])
-                    score = float(box.conf[0])
+            # Create a semi-transparent overlay for masks
+            mask_overlay = np.zeros_like(frame)
+            
+            # Define colors for different classes (random but consistent)
+            np.random.seed(42)  # For consistent colors across runs
+            colors = [(int(np.random.randint(0, 256)), 
+                       int(np.random.randint(0, 256)), 
+                       int(np.random.randint(0, 256))) for _ in range(len(self.class_names))]
+            
+            for i, box in enumerate(boxes):
+                if scores[i] >= confidence_threshold:
+                    # Extract coordinates
+                    x1, y1, x2, y2 = box.astype(int)
+                    class_id = int(labels[i].item())
+                    score = float(scores[i].item())
                     
-                    # Get class name - fallback to COCO classes if not available in result.names
-                    if class_id in names:
-                        class_name = names[class_id]
-                    elif class_id < len(COCO_CLASSES):
-                        class_name = COCO_CLASSES[class_id + 1]  # +1 because COCO_CLASSES starts with background
-                    else:
-                        class_name = f"ID:{class_id}"
+                    # Get the mask for this detection (threshold at 0.5)
+                    mask = masks[i, 0] > 0.5  # First channel of mask, threshold at 0.5
+                    segmentations.append(mask.astype(np.uint8) * 255)  # Convert to uint8 for consistency
                     
+                    # Get class name
+                    class_name = self.class_names[class_id] if class_id < len(self.class_names) else f"Unknown {class_id}"
+                    
+                    # Add to detections list
                     detections.append({
                         "box": [x1, y1, x2, y2],
                         "class_id": class_id,
@@ -486,35 +369,245 @@ class RTDETRWrapper:
                         "score": score
                     })
                     
-                    # Draw bounding box
-                    cv2.rectangle(annotated_frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
+                    # Use consistent color based on class ID
+                    color = colors[class_id % len(colors)]
                     
-                    # Draw label with class name instead of ID
+                    # Visualize instance mask - add color where mask is True
+                    colored_mask = np.zeros_like(frame)
+                    mask_resized = cv2.resize(mask.astype(np.uint8), (frame.shape[1], frame.shape[0]))
+                    colored_mask[mask_resized > 0] = color
+                    
+                    # Add mask overlay to frame
+                    cv2.addWeighted(annotated_frame, 1.0, colored_mask, 0.5, 0, annotated_frame)
+                    
+                    # Draw bounding box
+                    cv2.rectangle(annotated_frame, (x1, y1), (x2, y2), color, 2)
+                    
+                    # Draw label with class name and score
                     label_text = f"{class_name}: {score:.2f}"
-                    cv2.putText(annotated_frame, label_text, (x1, y1 - 10),
-                               cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+                    cv2.rectangle(annotated_frame, (x1, y1-25), (x1 + len(label_text)*9, y1), color, -1)
+                    cv2.putText(annotated_frame, label_text, (x1, y1-5),
+                               cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 2)
             
             postprocess_time = time.time() - postprocess_start
             total_time = time.time() - start_time
             
-            # Display timing information on frame and in console
+            # Display timing information on frame
+            fps_text = f"FPS: {1/total_time:.1f}" 
+            cv2.putText(annotated_frame, fps_text, (10, 30),
+                       cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
+            
+            # Add detailed timing report to console
+            print(f"Mask R-CNN timing: Total={total_time:.3f}s (FPS: {1/total_time:.1f}) | " 
+                  f"Preprocess={preprocess_time:.3f}s | Inference={inference_time:.3f}s | "
+                  f"Postprocess={postprocess_time:.3f}s | Detections={len(detections)} | Masks={len(segmentations)}")
+            
+            return detections, segmentations, annotated_frame
+            
+        except Exception as e:
+            print(f"Error during Mask R-CNN prediction: {e}")
+            import traceback
+            traceback.print_exc()
+            annotated_frame = frame.copy()
+            cv2.putText(annotated_frame, "Mask R-CNN Prediction Error", (50, 50),
+                        cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
+            return [], [], annotated_frame
+
+
+# --- SAM (Segment Anything Model) Wrapper ---
+class SAMWrapper:
+    """Wrapper for SAM (Segment Anything Model) inference."""
+    
+    def __init__(self, model_path=DEFAULT_MODEL_PATHS['sam'], config_path=None):
+        """
+        Initialize the SAM model wrapper.
+        
+        Args:
+            model_path (str or Path): Path to the SAM model weights file.
+            config_path (str, optional): Path to the configuration file (not used for SAM).
+        """
+        print("Initializing SAMWrapper")
+        self.model_path = Path(model_path)
+        
+        # Download model if it doesn't exist
+        if self.model_path == DEFAULT_MODEL_PATHS['sam']:
+            if not _download_model_if_needed(self.model_path):
+                print(f"Error: SAM model file {self.model_path} could not be found or downloaded.")
+                self.model = None
+                return
+        elif not self.model_path.exists():
+            print(f"Error: Custom SAM model file not found: {self.model_path}")
+            self.model = None
+            return
+
+        # Determine device (cuda or cpu)
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        print(f"Using device: {self.device}")
+        
+        try:
+            # Import SAM-specific modules here to avoid dependency if not used
+            from segment_anything import sam_model_registry, SamPredictor
+            
+            print("Loading SAM model...")
+            # Determine model type from path (default to vit_h)
+            if "vit_h" in str(self.model_path):
+                model_type = "vit_h"
+            elif "vit_l" in str(self.model_path):
+                model_type = "vit_l"
+            elif "vit_b" in str(self.model_path):
+                model_type = "vit_b"
+            else:
+                print(f"Model type not detected from path, defaulting to vit_h")
+                model_type = "vit_h"
+                
+            # Build the model
+            sam = sam_model_registry[model_type](checkpoint=str(self.model_path))
+            sam.to(device=self.device)
+            
+            # Create the predictor
+            self.model = SamPredictor(sam)
+            
+            print(f"SAM model ({model_type}) loaded successfully.")
+            
+        except ImportError:
+            print("Error: 'segment_anything' library not found. Please install it using:")
+            print("pip install git+https://github.com/facebookresearch/segment-anything.git")
+            self.model = None
+        except Exception as e:
+            print(f"Error loading SAM model: {e}")
+            import traceback
+            traceback.print_exc()
+            self.model = None
+    
+    def predict(self, frame, input_points=None, input_labels=None):
+        """
+        Performs segmentation on a single frame using the provided prompt points.
+        
+        Args:
+            frame (np.ndarray): Input video frame (BGR format).
+            input_points (np.ndarray): Array of prompt points of shape (N, 2).
+            input_labels (np.ndarray): Labels for each point (1 for foreground, 0 for background).
+                
+        Returns:
+            tuple: A tuple containing:
+                - detections (list): Empty list (SAM doesn't provide class info).
+                - segmentations (list): List of segmentation masks.
+                - annotated_frame (np.ndarray): Frame with visualizations drawn.
+        """
+        if self.model is None:
+            print("Warning: SAM model not loaded. Returning empty results.")
+            annotated_frame = frame.copy()
+            cv2.putText(annotated_frame, "SAM Model Not Loaded", (50, 50),
+                        cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
+            return [], [], annotated_frame
+        
+        # Check if we have input points for prompting
+        if input_points is None or len(input_points) == 0:
+            print("Warning: SAM requires input points for prompting. No points provided.")
+            annotated_frame = frame.copy()
+            cv2.putText(annotated_frame, "SAM: No input points provided", (50, 50),
+                        cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
+            return [], [], annotated_frame
+            
+        try:
+            # Start timing
+            start_time = time.time()
+            
+            # Convert BGR to RGB
+            rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            
+            # Set the image for feature extraction
+            print("Setting image for feature extraction...")
+            self.model.set_image(rgb_frame)
+            
+            feature_time = time.time() - start_time
+            inference_start = time.time()
+            
+            # If no labels are provided, default to all foreground (1)
+            if input_labels is None:
+                input_labels = np.ones(len(input_points), dtype=np.int32)
+
+            # Convert points and labels to numpy arrays if they're not already
+            if not isinstance(input_points, np.ndarray):
+                input_points = np.array(input_points)
+            if not isinstance(input_labels, np.ndarray):
+                input_labels = np.array(input_labels)
+                
+            # Ensure input_points is 2D
+            if input_points.ndim == 1:
+                input_points = input_points.reshape(1, 2)
+                
+            # Get masks from SAM
+            print(f"Generating masks with {len(input_points)} points...")
+            masks, scores, _ = self.model.predict(
+                point_coords=input_points,
+                point_labels=input_labels,
+                multimask_output=True  # Return multiple masks per prompt
+            )
+            
+            inference_time = time.time() - inference_start
+            postprocess_start = time.time()
+            
+            # Create a copy of the frame for annotation
+            annotated_frame = frame.copy()
+            
+            # Process and visualize all masks
+            segmentations = []
+            
+            # If we have masks, process them
+            if masks is not None and len(masks) > 0:
+                # Use different colors for different masks
+                colors = [(np.random.randint(0, 256), np.random.randint(0, 256), np.random.randint(0, 256)) 
+                          for _ in range(len(masks))]
+                
+                for i, (mask, score) in enumerate(zip(masks, scores)):
+                    # Convert mask to binary (0 or 1)
+                    binary_mask = mask.astype(np.uint8)
+                    segmentations.append(binary_mask)
+                    
+                    # Create colored mask for visualization
+                    color = colors[i % len(colors)]
+                    colored_mask = np.zeros_like(frame)
+                    colored_mask[binary_mask > 0] = color
+                    
+                    # Overlay the mask on the original frame
+                    cv2.addWeighted(annotated_frame, 1.0, colored_mask, 0.5, 0, annotated_frame)
+                    
+                    # Add text indicating score
+                    cv2.putText(annotated_frame, f"Segment {i+1}: {score:.2f}", (10, 50 + 30*i),
+                               cv2.FONT_HERSHEY_SIMPLEX, 0.7, color, 2)
+            
+            # Draw the prompt points
+            for i, (point, label) in enumerate(zip(input_points, input_labels)):
+                x, y = point.astype(int)
+                # Red for background points (label=0), green for foreground points (label=1)
+                color = (0, 0, 255) if label == 0 else (0, 255, 0)
+                cv2.circle(annotated_frame, (x, y), 5, color, -1)
+            
+            postprocess_time = time.time() - postprocess_start
+            total_time = time.time() - start_time
+            
+            # Add timing information
             cv2.putText(annotated_frame, f"FPS: {1/total_time:.1f}", (10, 30),
                        cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
             
             # Add detailed timing report to console
-            print(f"RT-DETR timing: Total={total_time:.3f}s (FPS: {1/total_time:.1f}) | " 
-                  f"Inference={inference_time:.3f}s | Postprocess={postprocess_time:.3f}s | "
-                  f"Detections={len(detections)}")
-
+            print(f"SAM timing: Total={total_time:.3f}s (FPS: {1/total_time:.1f}) | " 
+                  f"Feature extraction={feature_time:.3f}s | Inference={inference_time:.3f}s | "
+                  f"Postprocess={postprocess_time:.3f}s | Segments={len(segmentations)}")
+            
+            # Return empty detections since SAM doesn't classify objects
+            detections = []
+            
             return detections, segmentations, annotated_frame
             
         except Exception as e:
-            print(f"Error during RT-DETR prediction: {e}")
+            print(f"Error during SAM prediction: {e}")
             import traceback
             traceback.print_exc()
             annotated_frame = frame.copy()
-            cv2.putText(annotated_frame, "RT-DETR Prediction Error", (50, 80),
-                        cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
+            cv2.putText(annotated_frame, f"SAM Error: {str(e)[:50]}", (50, 50),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
             return [], [], annotated_frame
 
 
@@ -607,19 +700,15 @@ class ModelManager:
         """Initialize the appropriate model based on type"""
         print(f"Initializing model manager for type: {self.model_type}")
         try:
-            if self.model_type == 'faster-rcnn':
-                # Faster R-CNN wrapper from torchvision
-                return FasterRCNNWrapper(self.model_path)
-            elif self.model_type == 'yolo-seg': # Added case for YOLO segmentation
-                # Reuse YOLOWrapper, it handles segmentation models
+            if self.model_type == 'mask-rcnn':
+                # Mask R-CNN wrapper from torchvision
+                return MaskRCNNWrapper(self.model_path)
+            elif self.model_type == 'yolo-seg':
+                # YOLO segmentation model
                 return YOLOWrapper(self.model_path)
-            elif self.model_type == 'rtdetr':
-                # RTDETR wrapper handles device internally via Ultralytics
-                return RTDETRWrapper(self.model_path, self.config_path)
             elif self.model_type == 'sam':
-                # SAM model isn't implemented for this task
-                print(f"Note: SAM model is not implemented for the project evaluation task. Please use one of the three main models: faster-rcnn, rtdetr, or yolo-seg.")
-                return None
+                # Segment Anything Model (SAM)
+                return SAMWrapper(self.model_path, self.config_path)
             else:
                 print(f"Error: Unsupported model type: {self.model_type}")
                 return None # Return None for unsupported types
@@ -641,7 +730,8 @@ class ModelManager:
 
         Returns:
             tuple: Prediction results. Format depends on the model type:
-                   - YOLO/RT-DETR/YOLO-Seg: (detections, segmentations, annotated_frame)
+                   - YOLO-Seg/Mask R-CNN: (detections, segmentations, annotated_frame)
+                   - SAM: (detections, segmentations, annotated_frame) with detections being empty
                    Returns ([], [], frame) if the model wrapper is not valid or prediction fails.
         """
         if self.model_wrapper is None or not hasattr(self.model_wrapper, 'predict'):
@@ -652,12 +742,13 @@ class ModelManager:
             return [], [], annotated_frame # Return empty results and original frame
 
         try:
-            # Removed SAM-specific logic
-            # All current models (YOLO, YOLO-Seg, RT-DETR) use the same predict signature
-            # Ignore input_points and input_labels if passed
-            if input_points is not None or input_labels is not None:
-                 print(f"Warning: input_points/input_labels provided but model type is {self.model_type}. Ignoring.")
-            return self.model_wrapper.predict(frame)
+            # Handle different model types
+            if self.model_type == 'sam':
+                # SAM needs point prompts to generate masks
+                return self.model_wrapper.predict(frame, input_points, input_labels)
+            else:
+                # Other models (YOLO-Seg, Mask R-CNN) don't use input points
+                return self.model_wrapper.predict(frame)
         except Exception as e:
             print(f"Error during prediction with {self.model_type}: {e}")
             import traceback

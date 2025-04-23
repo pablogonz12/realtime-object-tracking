@@ -32,9 +32,9 @@ from models.models import ModelManager # Removed unused YOLOWrapper, RTDETRWrapp
 
 # Default model paths for auto-download
 DEFAULT_MODELS = {
-    'faster-rcnn': 'models/pts/fasterrcnn_resnet50_fpn.pt',
+    'mask-rcnn': 'models/pts/maskrcnn_resnet50_fpn.pt',
     'yolo-seg': 'models/pts/yolov8n-seg.pt',
-    'rtdetr': 'models/pts/rtdetr-l.pt'
+    'sam': 'models/pts/sam_vit_h.pt'
 }
 
 def display_video_with_model(video_path, model_manager):
@@ -276,8 +276,8 @@ class GraphicalGUI:
         
         # Define model requirements - moved this BEFORE using it in _update_model_info
         self.model_requirements = {
-            "faster-rcnn": {
-                "description": "Two-stage detection with ResNet50 FPN backbone (TorchVision)",
+            "mask-rcnn": {
+                "description": "Instance segmentation with ResNet50 FPN backbone (TorchVision)",
                 "ram": "8GB",
                 "vram": "4GB",
                 "cpu_cores": "4",
@@ -288,13 +288,6 @@ class GraphicalGUI:
                 "ram": "4GB",
                 "vram": "2GB",
                 "cpu_cores": "2",
-                "pytorch": "1.10+"
-            },
-            "rtdetr": {
-                "description": "Real-time detection transformer (Ultralytics)",
-                "ram": "6GB",
-                "vram": "3GB",
-                "cpu_cores": "4",
                 "pytorch": "1.10+"
             },
             "sam": {
@@ -476,6 +469,11 @@ class GraphicalGUI:
         """Stop video processing"""
         self.stop_preview = True
         self.pause_processing = False
+        
+        # Signal the stop event to stop the video processing thread
+        if hasattr(self, 'stop_event'):
+            self.stop_event.set()
+        
         self.status_var.set("Processing stopped")
         # Reset processing state
         self.processing_active = False
@@ -856,6 +854,14 @@ class GraphicalGUI:
         if self.processing_active:
             return
         try:
+            # First, stop any running preview videos
+            self.stop_preview = True
+            if hasattr(self, 'video_thread') and self.video_thread and self.video_thread.is_alive():
+                try:
+                    self.video_thread.join(timeout=0.5)
+                except Exception as e:
+                    print(f"Warning: Could not join existing video thread: {e}")
+                    
             # Get model type
             model_type = self.model_type_var.get()
             # Determine video path based on selection method
@@ -1395,6 +1401,14 @@ class GraphicalGUI:
             self.stop_webcam_detection()
             return
         try:
+            # First, stop any running preview videos
+            self.stop_preview = True
+            if hasattr(self, 'video_thread') and self.video_thread and self.video_thread.is_alive():
+                try:
+                    self.video_thread.join(timeout=0.5)
+                except Exception as e:
+                    print(f"Warning: Could not join existing video thread: {e}")
+            
             # Get model type
             model_type = self.model_type_var.get()
             # Get model path (custom or default)
@@ -1473,96 +1487,47 @@ class GraphicalGUI:
             self.start_webcam_detection()
         
     def _process_webcam_thread(self, model_manager):
-        """Thread function to process webcam frames in real-time with optimizations."""
+        """Thread function for processing webcam frames in real-time with optimizations."""
         try:
-            # Use the already opened webcam object if available
-            if not hasattr(self, 'webcam') or self.webcam is None or not self.webcam.isOpened():
-                 self.webcam = cv2.VideoCapture(0) # Open the default webcam
-                 if not self.webcam.isOpened():
-                     self.show_preview_message("Cannot access webcam")
-                     self.processing_active = False # Ensure state is reset
-                     self.root.after(0, lambda: self.webcam_button.config(text="Start Camera")) # Reset button
-                     return
-            cap = self.webcam # Use the instance variable
-            # Get webcam properties
-            width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-            height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-            # --- Performance Optimizations ---
-            # 1. Processing Resolution (already implemented via resize)
-            process_width = 640
-            process_height = 480
-            # 2. Frame Skipping (already implemented)
-            frame_skip = 2  # Process every Nth frame
-            # 3. UI Update Rate Limitations ---
-            webcam_fps = cap.get(cv2.CAP_PROP_FPS) or 30 # Estimate if needed
-            target_display_fps = min(15, webcam_fps / frame_skip) # Limit display FPS
-            frame_interval_ms = int(1000 / target_display_fps) if target_display_fps > 0 else 100 # Min 100ms interval
-            # --- End Optimizations ---
-            # Calculate resize ratio for display
-            canvas_width = self.preview_canvas.winfo_width() or 400
-            canvas_height = self.preview_canvas.winfo_height() or 300
-            display_ratio = min(canvas_width / process_width, canvas_height / process_height)
-            display_width = int(process_width * display_ratio)
-            display_height = int(process_height * display_ratio)
-            # Reset statistics
-            self.frame_count = 0 # Processed frames
-            self.total_frames = 0 # Total frames read
-            self.detection_counts = {}
-            start_time = time.time()
-            last_update_time = 0
-            processing_errors = 0
-            model_device = getattr(model_manager, 'device', 'unknown')
-            print(f"Starting webcam processing with {model_manager.model_type} on {model_device}")
-            while not self.stop_preview:
-                ret, frame = cap.read()
-                if not ret:
-                    print("Webcam stream ended or error reading frame.")
-                    break # Exit loop if frame read fails
-                self.total_frames += 1  # Count total frames read
-                # Apply frame skipping
-                if self.total_frames % frame_skip != 0:
-                    continue  # Skip frames
-                self.frame_count += 1  # Count processed frames
-                current_time = int(time.time() * 1000)
-                # Update status periodically
-                if self.frame_count % 10 == 0:
-                     self.root.after(0, lambda count=self.frame_count: 
-                                    self.status_var.set(f"Webcam processing frame {count}"))
-                try:
-                    # Resize frame for processing
-                    frame_resized_for_processing = cv2.resize(frame, (process_width, process_height))
-                    # Perform prediction and get annotated frame directly
-                    detections, segmentations, annotated_frame = model_manager.predict(frame_resized_for_processing)
-                    # Update detection counts (optional for webcam, but good practice)
-                    for det in detections:
-                        class_name = det.get('class_name', 'Unknown')
-                        if class_name != 'Unknown':
-                            self.detection_counts[class_name] = self.detection_counts.get(class_name, 0) + 1
-                    # Limit display update rate
-                    if (current_time - last_update_time) >= frame_interval_ms:
-                        # Resize annotated frame for display
-                        frame_resized_for_display = cv2.resize(annotated_frame, (display_width, display_height))
-                        frame_rgb = cv2.cvtColor(frame_resized_for_display, cv2.COLOR_BGR2RGB)
-                        # Update canvas on main thread
-                        pil_img = Image.fromarray(frame_rgb)
-                        # Use _update_video_canvas for consistency
-                        self.root.after(0, self._update_video_canvas, 
-                                       pil_img, self.frame_count, self.total_frames, model_manager.model_type) 
-                        last_update_time = current_time
-                except Exception as e:
-                    processing_errors += 1
-                    print(f"Error processing webcam frame {self.frame_count}: {e}")
-                    # Don't show message box for webcam errors to avoid spamming
-                    if processing_errors > 10 and processing_errors % 50 == 0: # Log occasionally
-                         print("Multiple webcam processing errors occurred.")
-                    # Continue processing next frame
-            # Calculate total processing time
-            self.processing_time = time.time() - start_time
-            # Release webcam ONLY if we opened it in this thread (or handle externally)
-            # The current logic in start/stop suggests releasing it in stop_webcam_detection
-            # cap.release() # Avoid releasing here if managed externally
-            print(f"Webcam processing stopped. Processed {self.frame_count} frames.")
-            # Statistics are shown by stop_webcam_detection after the thread finishes
+            # Import the video utilities
+            from inference.video_utils import process_webcam_with_model
+            
+            # Create events for stopping and pausing
+            self.stop_event = threading.Event()
+            self.pause_event = threading.Event()
+            
+            # Define display callback function for processing
+            def display_callback(frame, frame_count, total_frames, model_type, progress=None):
+                if frame is not None:
+                    self._display_image_on_canvas(frame)
+                if frame_count % 10 == 0:
+                    self.root.after(0, lambda count=frame_count: 
+                                   self.status_var.set(f"Webcam processing frame {count}"))
+            
+            # Update UI to indicate processing started
+            self.status_var.set(f"Processing webcam with {model_manager.model_type}...")
+            
+            # Process webcam with the shared utility
+            stats = process_webcam_with_model(
+                model_manager=model_manager,
+                callback=display_callback,
+                stats_callback=None,  # We'll handle stats after completion
+                stop_event=self.stop_event,
+                pause_event=self.pause_event,
+                camera_id=0,
+                process_width=640,
+                process_height=480,
+                frame_skip=2
+            )
+            
+            # Store statistics for display after stopping
+            self.frame_count = stats['frames_processed']
+            self.total_frames = stats['total_frames']
+            self.processing_time = stats['processing_time']
+            self.detection_counts = stats['detections']
+            
+            print(f"Webcam processing complete. Processed {self.frame_count} frames.")
+            
         except Exception as e:
             print(f"Fatal error in webcam processing thread: {e}")
             traceback.print_exc()
@@ -1732,9 +1697,116 @@ class GraphicalGUI:
     def pause_processing(self):
         """Pause or resume video processing"""
         self.pause_processing = not self.pause_processing
+        
+        # Signal the pause event to pause/resume the video processing thread
+        if hasattr(self, 'pause_event'):
+            if self.pause_processing:
+                self.pause_event.set()  # Set the event to pause
+            else:
+                self.pause_event.clear()  # Clear the event to resume
+                
+        # Update button text
         self.pause_button.config(text="Resume" if self.pause_processing else "Pause")
         
-# Removed validate_model function as initialization handles this now
+    def process_video_with_model(self, video_path, model_manager):
+        """Process a video with the specified model manager and display results in the preview panel"""
+        # Update status
+        self.status_var.set(f"Processing video with {model_manager.model_type}...")
+        
+        # Make sure we're in processing mode
+        self.processing_active = True
+        self._update_buttons(True)
+        
+        # Reset flags
+        self.stop_preview = False
+        self.pause_processing = False
+        
+        # Start the processing in a thread to keep UI responsive
+        self.video_thread = threading.Thread(
+            target=self._process_video_thread,
+            args=(video_path, model_manager),
+            daemon=True
+        )
+        self.video_thread.start()
+        
+    def _process_video_thread(self, video_path, model_manager):
+        """Thread function for processing video with model"""
+        try:
+            # Import the video utilities
+            from inference.video_utils import process_video_with_model
+            
+            # Create events for stopping and pausing
+            self.stop_event = threading.Event()
+            self.pause_event = threading.Event()
+            
+            # Define display callback function for processing
+            def display_callback(frame, frame_count, total_frames, model_type, progress=None):
+                if frame is not None:
+                    self._display_image_on_canvas(frame)
+                if progress is not None and frame_count % 10 == 0:
+                    self.root.after(0, lambda f=frame_count, p=progress: self.status_var.set(
+                        f"Processing frame {f}/{total_frames} ({p:.1f}%)"))
+            
+            # Set flags
+            self.stop_preview = False
+            if hasattr(self, 'stop_event'):
+                self.stop_event.clear()
+            if hasattr(self, 'pause_event'):
+                self.pause_event.clear() 
+                
+            # Update UI to indicate processing started
+            self.status_var.set(f"Processing video with {model_manager.model_type}...")
+            
+            # Process video with the shared utility
+            stats = process_video_with_model(
+                video_path=video_path,
+                model_manager=model_manager,
+                callback=display_callback,
+                stats_callback=self.show_completion_stats,
+                stop_event=self.stop_event,
+                pause_event=self.pause_event,
+                add_fps=True
+            )
+            
+            # Update UI to indicate completion
+            self.root.after(0, lambda: self.status_var.set(
+                f"Completed processing {stats['frames_processed']} frames in {stats['processing_time']:.1f}s ({stats['actual_fps']:.1f} FPS)"))
+                
+            # Update UI buttons back to normal state
+            self.root.after(0, lambda: self._update_buttons(False))
+            
+        except Exception as e:
+            print(f"Fatal error in video processing thread: {e}")
+            traceback.print_exc()
+            self.root.after(0, lambda err=str(e): self._display_message_on_canvas(
+                f"Video processing error:\n{err}"))
+            self.root.after(0, lambda: self._update_buttons(False))
+            
+    def show_completion_stats(self, stats):
+        """Show completion statistics after processing the video"""
+        # Format statistics
+        stats_message = (
+            f"Model: {stats['model_type'].upper()} ({stats['model_device']})\n"
+            f"Frames: {stats['frames_processed']} / {stats['total_frames']}\n"
+            f"Time: {stats['processing_time']:.2f}s\n"
+            f"FPS: {stats['actual_fps']:.1f}\n\n"
+        )
+        
+        # Sort detections by count (descending)
+        sorted_detections = sorted(stats['detections'].items(), key=lambda x: x[1], reverse=True)
+        if sorted_detections:
+            stats_message += "Detections:\n"
+            # Show top 10 detections
+            for cls, count in sorted_detections[:10]:
+                stats_message += f"• {cls}: {count}\n"
+            # Indicate if there were more
+            if len(sorted_detections) > 10:
+                stats_message += f"• ... and {len(sorted_detections) - 10} more classes"
+        else:
+            stats_message += "No detections were found in the video."
+                
+        # Display stats in the preview area
+        self._display_message_on_canvas(stats_message, "Processing Results")
 
 def main():
     """
@@ -1743,7 +1815,7 @@ def main():
     parser = argparse.ArgumentParser(description="Computer Vision Project")
     parser.add_argument("--cli", action="store_true", help="Run in command-line mode")
     # parser.add_argument("--terminal-ui", action="store_true", help="Run with terminal-based UI (Currently disabled)") # Disabled TUI
-    parser.add_argument("--model-type", type=str, choices=["faster-rcnn", "yolo-seg", "rtdetr"], 
+    parser.add_argument("--model-type", type=str, choices=["mask-rcnn", "yolo-seg", "sam"], 
                           help="Type of model to use (required for CLI)")
     parser.add_argument("--model-path", type=str, help="Path to the model weights file (optional for CLI, uses default)")
     # parser.add_argument("--config-path", type=str, help="Path to the configuration file (if required)") # Config path not used
