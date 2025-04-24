@@ -2,17 +2,17 @@
 Computer Vision Project Pipeline Script
 
 This script serves as the main pipeline for the computer vision project evaluation task.
-It coordinates the evaluation of three state-of-the-art computer vision models and the
+It coordinates the evaluation of two state-of-the-art computer vision models and the
 creation of a demonstration video showcasing the best-performing model.
 
 The pipeline:
-1. Evaluates all three models on the COCO validation dataset
+1. Evaluates both models on the COCO validation dataset
 2. Compares their performance metrics
 3. Identifies the best-performing model based on selected criteria
 4. Creates a demonstration video with the best model
 
 Task requirements:
-- Evaluate three SoA approaches on validity, reliability, and objectivity
+- Evaluate two SoA approaches on validity, reliability, and objectivity
 - Present a qualitative analysis of the different approaches
 - Create a demo video with the best-performing model
 """
@@ -43,7 +43,7 @@ RESULTS_DIR.mkdir(exist_ok=True, parents=True)
 OUTPUT_DIR.mkdir(exist_ok=True, parents=True)
 
 # Model types to evaluate
-MODEL_TYPES = ["faster-rcnn", "rtdetr", "yolo-seg"]
+MODEL_TYPES = ["mask-rcnn", "yolo-seg"]
 
 def run_evaluation(max_images=100, save_visualizations=True):
     """
@@ -112,7 +112,7 @@ def determine_best_model(results):
     if "yolo-seg" in results and results["yolo-seg"].get("coco_segm_metrics"):
         segm_ap = results["yolo-seg"]["coco_segm_metrics"].get("Segm_AP_IoU=0.50", 0)
         # Add segmentation bonus
-        metrics["segmentation_bonus"] = {"faster-rcnn": 0, "rtdetr": 0, "yolo-seg": segm_ap}
+        metrics["segmentation_bonus"] = {"mask-rcnn": 0, "yolo-seg": segm_ap}
         weights["segmentation_bonus"] = 0.1  # 10% weight for segmentation capability
     
     # Find max values for normalization
@@ -330,19 +330,19 @@ def create_comparison_report(results, scoring_details):
         f.write('<h3>Feature Comparison</h3>\n')
         
         f.write('<table>\n')
-        f.write('<tr><th>Feature</th><th>Faster R-CNN</th><th>RT-DETR</th><th>YOLOv8-Seg</th></tr>\n')
+        f.write('<tr><th>Feature</th><th>Mask R-CNN</th><th>YOLOv8-Seg</th></tr>\n')
         
         features = [
-            ("Architecture", "Two-Stage CNN", "Transformer-based", "Single-Stage CNN"),
-            ("Segmentation Support", "No", "No", "Yes"),
-            ("Real-time Processing", "No", "Yes", "Yes"),
-            ("Precision Focus", "High", "Balanced", "Balanced"),
-            ("Small Object Detection", "Strong", "Medium", "Medium"),
-            ("Implementation Complexity", "High", "Medium", "Low")
+            ("Architecture", "Two-Stage CNN", "Single-Stage CNN"),
+            ("Segmentation Support", "Yes", "Yes"),
+            ("Real-time Processing", "No", "Yes"),
+            ("Precision Focus", "High", "Balanced"),
+            ("Small Object Detection", "Strong", "Medium"),
+            ("Implementation Complexity", "High", "Low")
         ]
         
-        for feature, faster_rcnn, rtdetr, yolo_seg in features:
-            f.write(f'<tr><td>{feature}</td><td>{faster_rcnn}</td><td>{rtdetr}</td><td>{yolo_seg}</td></tr>\n')
+        for feature, mask_rcnn, yolo_seg in features:
+            f.write(f'<tr><td>{feature}</td><td>{mask_rcnn}</td><td>{yolo_seg}</td></tr>\n')
         
         f.write('</table>\n')
         
@@ -354,13 +354,8 @@ def create_comparison_report(results, scoring_details):
                     'and detection quality. Its segmentation capabilities provide more detailed object boundaries, which is '
                     'valuable for applications requiring precise object localization. The model demonstrated strong detection '
                     'performance across diverse object categories while maintaining real-time processing speeds.</p>\n')
-        elif best_model == 'rtdetr':
-            f.write('<p>The <strong>RT-DETR</strong> model demonstrated the best overall performance, combining the '
-                    'accuracy of transformer-based detection with efficient real-time processing. The model showed '
-                    'excellent detection capabilities across a wide range of object categories while maintaining '
-                    'competitive processing speeds, making it suitable for applications requiring both accuracy and efficiency.</p>\n')
-        elif best_model == 'faster-rcnn':
-            f.write('<p>The <strong>Faster R-CNN</strong> model achieved the highest evaluation score, showcasing '
+        elif best_model == 'mask-rcnn':
+            f.write('<p>The <strong>Mask R-CNN</strong> model achieved the highest evaluation score, showcasing '
                     'its mature and refined detection capabilities. While not as fast as some newer models, it demonstrated '
                     'superior detection accuracy and consistency across diverse objects. Its two-stage detection approach '
                     'provides reliable results, making it well-suited for applications where detection quality is prioritized '
@@ -407,8 +402,7 @@ def run_demo_video(best_model, video_path=None):
         # For segmentation models, prefer videos with people/objects for segmentation
         suggested_keywords = {
             "yolo-seg": ["person", "people", "fruit", "detection"],
-            "rtdetr": ["car", "traffic", "detection", "person"],
-            "faster-rcnn": ["person", "detection", "bicycle", "car"]
+            "mask-rcnn": ["person", "detection", "bicycle", "car"]
         }
         
         # Try to find a video matching the suggested keywords for this model

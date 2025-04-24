@@ -30,7 +30,7 @@ def create_demo_video(model_type, video_path, output_path=None, model_path=None,
     Create a demonstration video with object detection and segmentation overlay
     
     Args:
-        model_type (str): Type of model to use ('faster-rcnn', 'rtdetr', 'yolo-seg', 'sam', 'mask-rcnn')
+        model_type (str): Type of model to use ('mask-rcnn', 'yolo-seg')
         video_path (str or Path): Path to input video file
         output_path (str or Path, optional): Path to save output video file
         model_path (str or Path, optional): Path to model weights file
@@ -133,7 +133,7 @@ def main():
     """Main function"""
     parser = argparse.ArgumentParser(description="Create demo video with object detection/segmentation")
     parser.add_argument("--model", "-m", type=str, default="yolo-seg", 
-                       choices=["faster-rcnn", "rtdetr", "yolo-seg", "sam", "mask-rcnn"],
+                       choices=["mask-rcnn", "yolo-seg"],
                        help="Model type to use (default: yolo-seg)")
     parser.add_argument("--video", "-v", type=str,
                        help="Video file path (if not specified, will list available samples)")

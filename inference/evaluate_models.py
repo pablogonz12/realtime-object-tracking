@@ -1,10 +1,9 @@
 """
 Model Evaluation Script for Computer Vision Project
 
-This script evaluates three state-of-the-art object detection and segmentation models:
-1. Faster R-CNN (TorchVision)
-2. RT-DETR (Real-Time Detection Transformer by Ultralytics)
-3. YOLO-Seg (YOLOv8 with segmentation by Ultralytics)
+This script evaluates two state-of-the-art object detection and segmentation models:
+1. Mask R-CNN (TorchVision)
+2. YOLO-Seg (YOLOv8 with segmentation by Ultralytics)
 
 The evaluation measures:
 - Validity: Precision, Recall, mAP
@@ -48,9 +47,6 @@ RESULTS_DIR.mkdir(exist_ok=True, parents=True)
 MODELS_TO_EVALUATE = [
     {"type": "mask-rcnn", "path": DEFAULT_MODEL_PATHS['mask-rcnn'], "config": None},
     {"type": "yolo-seg", "path": DEFAULT_MODEL_PATHS['yolo-seg'], "config": None}
-    # Removed RTMDet entry
-    # If you wanted to evaluate FastSAM (though it lacks classification for mAP):
-    # {"type": "fastsam-s", "path": DEFAULT_MODEL_PATHS['fastsam-s'], "config": None}
 ]
 
 # COCO val2017 has 5000 images total
@@ -682,7 +678,7 @@ def main():
                         help=f"Number of COCO val2017 images to use (max {COCO_VAL_TOTAL_IMAGES}, default: 50)")
     parser.add_argument("--no-vis", action="store_true", 
                         help="Skip saving visualizations (useful for evaluating many images)")
-    parser.add_argument("--models", type=str, nargs="+", choices=["mask-rcnn", "yolo-seg", "rtmdet-ins"], 
+    parser.add_argument("--models", type=str, nargs="+", choices=["mask-rcnn", "yolo-seg"], 
                         help="Specific models to evaluate (default: all)")
     parser.add_argument("--visualize", action="store_true",
                         help="Generate comprehensive visualization dashboard after evaluation")

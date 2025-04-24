@@ -1,6 +1,6 @@
 """
 Consolidated Computer Vision Models
-This file combines model wrappers (Mask R-CNN, SAM, YOLO-Seg) into a single file
+This file combines model wrappers (Mask R-CNN and YOLO-Seg) into a single file
 for easier maintenance and use.
 """
 
@@ -38,20 +38,13 @@ CONFIGS_DIR = Path("models/configs") # Define config directory
 CONFIGS_DIR.mkdir(parents=True, exist_ok=True)
 
 DEFAULT_MODEL_PATHS = {
-    # 'faster-rcnn': MODELS_DIR / 'fasterrcnn_resnet50_fpn.pt', # Keep if needed, but Mask R-CNN is preferred for segmentation
     'yolo-seg': MODELS_DIR / 'yolov8n-seg.pt',
-    'mask-rcnn': MODELS_DIR / 'maskrcnn_resnet50_fpn.pt',
-    # 'rtmdet-ins': MODELS_DIR / 'rtmdet_x_8xb32-300e_coco.pth', # Removed RTMDet
-    # 'fastsam-s': MODELS_DIR / 'FastSAM-s.pt', # Removed FastSAM
-    # 'fastsam-x': MODELS_DIR / 'FastSAM-x.pt'  # Removed FastSAM
+    'mask-rcnn': MODELS_DIR / 'maskrcnn_resnet50_fpn.pt'
 }
 
 MODEL_URLS = {
-    "yolov8n-seg.pt": "https://github.com/ultralytics/assets/releases/download/v0.0.0/yolov8n-seg.pt",
+    "yolov8n-seg.pt": "https://github.com/ultralytics/assets/releases/download/v0.0.0/yolov8n-seg.pt"
     # Mask R-CNN uses torchvision built-in
-    # "rtmdet_x_8xb32-300e_coco.pth": "https://download.openmmlab.com/mmdetection/v3.0/rtmdet/rtmdet_x_8xb32-300e_coco/rtmdet_x_8xb32-300e_coco_20220715_230555-cc79b9ae.pth", # Removed RTMDet URL
-    # "FastSAM-s.pt": "https://github.com/ultralytics/assets/releases/download/v0.0.0/FastSAM-s.pt", # Removed FastSAM URL
-    # "FastSAM-x.pt": "https://github.com/ultralytics/assets/releases/download/v0.0.0/FastSAM-x.pt"  # Removed FastSAM URL
 }
 
 # --- Helper Function for Downloading ---
@@ -442,10 +435,10 @@ class ModelManager:
         Initializes the appropriate model wrapper based on the model type.
 
         Args:
-            model_type (str): Type of the model ('mask-rcnn', 'yolo-seg', 'rtmdet-ins').
+            model_type (str): Type of the model ('mask-rcnn', 'yolo-seg').
             model_path (str or Path, optional): Path to the model weights file.
                                                 If None, uses default path for the type.
-            config_path (str, optional): Path to the configuration file (used by RTMDet-Ins).
+            config_path (str, optional): Path to the configuration file (not used currently).
         """
         self.model_type = model_type.lower()
         self.config_path = config_path # Store config path
@@ -527,9 +520,6 @@ class ModelManager:
                 return MaskRCNNWrapper(self.model_path)
             elif self.model_type == 'yolo-seg':
                 return YOLOWrapper(self.model_path)
-            # elif self.model_type == 'rtmdet-ins': # Removed RTMDet
-            #     # RTMDet-Ins model using MMDetection
-            #     return RTMDetWrapper(self.model_path, self.config_path)
             else:
                 print(f"Error: Unsupported model type: {self.model_type}")
                 return None # Return None for unsupported types

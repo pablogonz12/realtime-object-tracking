@@ -28,15 +28,13 @@ VISUALIZATIONS_DIR.mkdir(exist_ok=True, parents=True)
 # Define a consistent color scheme for models
 MODEL_COLORS = {
     "yolo-seg": "#2ca02c",     # Green
-    "mask-rcnn": "#d62728",    # Red
-    "yolact": "#1f77b4"        # Blue
+    "mask-rcnn": "#d62728"     # Red
 }
 
 # Define full names for models for better labeling
 MODEL_NAMES = {
     "yolo-seg": "YOLOv8-Seg",
-    "mask-rcnn": "Mask R-CNN",
-    "yolact": "YOLACT"
+    "mask-rcnn": "Mask R-CNN"
 }
 
 class MetricsVisualizer:
