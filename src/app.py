@@ -526,11 +526,12 @@ class GraphicalGUI:
             self.status_var.set("Ready")
 
     def delete_generated_data(self):
-        """Confirm and delete generated output videos and downloaded COCO data."""
+        """Confirm and delete generated output videos, results, and downloaded COCO data."""
         if messagebox.askyesno("Delete Generated Data",
-                               "Are you sure you want to delete all generated output videos and downloaded COCO image data?\n\n"
+                               "Are you sure you want to delete all generated output videos, evaluation results, and downloaded COCO image data?\n\n"
                                "This will remove:\n"
                                "- inference/output_videos/\n"
+                               "- inference/results/\n"
                                "- data_sets/image_data/coco/\n\n"
                                "This action cannot be undone."):
             self.status_var.set("Deleting generated data...")
@@ -540,6 +541,7 @@ class GraphicalGUI:
             project_root = Path(__file__).resolve().parent.parent
             paths_to_delete = [
                 project_root / "inference" / "output_videos",
+                project_root / "inference" / "results", # Added this line
                 project_root / "data_sets" / "image_data" / "coco"
             ]
 
@@ -547,9 +549,21 @@ class GraphicalGUI:
                 try:
                     if path.exists():
                         if path.is_dir():
-                            shutil.rmtree(path)
-                            print(f"Deleted directory: {path}")
-                            deleted_count += 1
+                            # Special handling for results: delete contents, not the folder itself
+                            if path.name == "results":
+                                print(f"Deleting contents of directory: {path}")
+                                for item in path.iterdir():
+                                    if item.is_file():
+                                        item.unlink()
+                                        print(f"  Deleted file: {item.name}")
+                                    elif item.is_dir():
+                                        shutil.rmtree(item)
+                                        print(f"  Deleted subdirectory: {item.name}")
+                                deleted_count += 1 # Count the directory contents deletion as one operation
+                            else:
+                                shutil.rmtree(path)
+                                print(f"Deleted directory: {path}")
+                                deleted_count += 1
                         else:
                             # Should not happen based on paths, but handle just in case
                             path.unlink()
@@ -565,7 +579,7 @@ class GraphicalGUI:
             if error_count > 0:
                 messagebox.showerror("Deletion Error", f"Errors occurred while deleting generated data. Check console for details.")
             elif deleted_count > 0:
-                messagebox.showinfo("Deletion Complete", "Generated output videos and COCO data deleted successfully.")
+                messagebox.showinfo("Deletion Complete", "Generated output videos, results, and COCO data deleted successfully.")
             else:
                  messagebox.showinfo("Deletion Complete", "No generated data found to delete.")
 
@@ -1735,6 +1749,7 @@ class GraphicalGUI:
 
             # Process video with the shared utility
             stats = process_video_with_model(
+
                 video_path=video_path,
                 model_manager=model_manager,
                 callback=display_callback,
@@ -2323,4 +2338,5 @@ if __name__ == "__main__":
     # Ensure the models/pts directory exists
     os.makedirs("models/pts", exist_ok=True)
     main()
+
 

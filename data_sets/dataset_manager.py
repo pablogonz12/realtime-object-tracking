@@ -423,27 +423,32 @@ class DatasetManager:
 
 
     def delete_datasets(self):
-        """Delete all downloaded and extracted datasets and compressed files"""
+        """Delete downloaded COCO dataset (images and annotations), leaving other data intact."""
         deleted = False
-        if self.image_dir.exists():
-            print(f"Deleting dataset directory: {self.image_dir}...")
+        # Specifically target the COCO directory for deletion
+        if self.coco_dir.exists():
+            print(f"Deleting COCO dataset directory: {self.coco_dir}...")
             try:
-                shutil.rmtree(self.image_dir)
-                print("Successfully deleted image dataset directory.")
+                shutil.rmtree(self.coco_dir)
+                print("Successfully deleted COCO dataset directory.")
                 deleted = True
             except Exception as e:
-                print(f"Error deleting {self.image_dir}: {e}")
+                print(f"Error deleting {self.coco_dir}: {e}")
         else:
-            print("Image dataset directory not found.")
+            print("COCO dataset directory not found.")
 
-        # Also check for stray zip files at the base level if deletion failed partially before
-        stray_files = list(self.base_dir.glob("*.zip")) # Check in base_dir too
+        # Also check for stray COCO-related zip files at the base level and within coco_dir (if it still exists partially)
+        stray_files = list(self.base_dir.glob("*.zip")) # Check in data_sets/
         if self.coco_dir.exists(): # Check inside coco_dir as well
              stray_files.extend(list(self.coco_dir.glob("*.zip")))
+        else: # If coco_dir was deleted or never existed, check image_dir for zips
+             stray_files.extend(list(self.image_dir.glob("*.zip")))
+
 
         for stray_zip in stray_files:
+             # Only delete zips clearly related to COCO
              if "val2017" in stray_zip.name or "annotations" in stray_zip.name:
-                 print(f"Deleting stray zip file: {stray_zip}")
+                 print(f"Deleting stray COCO zip file: {stray_zip}")
                  try:
                      stray_zip.unlink()
                      deleted = True
@@ -451,9 +456,9 @@ class DatasetManager:
                      print(f"Error deleting stray file {stray_zip}: {e}")
 
         if deleted:
-            print("Deletion process finished.")
+            print("COCO dataset deletion process finished.")
         else:
-            print("Nothing found to delete.")
+            print("No COCO data found to delete.")
 
 
 def main():
