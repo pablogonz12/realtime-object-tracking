@@ -594,6 +594,105 @@ class MetricsVisualizer:
             plt.close('all')
             return None
 
+    def plot_radar_comparison(self, show_plot=False):
+
+        if not self.results:
+            print("No results data available for radar chart")
+            return None
+        
+        try:
+            model_types = list(self.results.keys())
+            if not model_types:
+                print("No models found in results.")
+                return None
+
+            # Define metrics for the radar chart axes
+            categories = ['mAP', 'AP@50', 'AP@75', 'Norm. FPS']
+            num_vars = len(categories)
+
+            # Extract data and find max FPS for normalization
+            data = []
+            max_fps = 0
+            for m_type in model_types:
+                metrics = self.results[m_type]
+                coco_metrics = metrics.get("coco_metrics", {})
+                fps = metrics.get("fps", 0)
+                
+                if fps > max_fps:
+                    max_fps = fps
+                
+                data.append({
+                    "mAP": coco_metrics.get("AP_IoU=0.50:0.95", 0),
+                    "AP@50": coco_metrics.get("AP_IoU=0.50", 0),
+                    "AP@75": coco_metrics.get("AP_IoU=0.75", 0),
+                    "FPS": fps # Store raw FPS first
+                })
+
+            # Prepare values for plotting (including normalized FPS)
+            plot_values = []
+            for i, m_type in enumerate(model_types):
+                model_data = data[i]
+                # Normalize FPS (avoid division by zero)
+                norm_fps = (model_data["FPS"] / max_fps) if max_fps > 0 else 0
+                
+                values = [
+                    model_data["mAP"], 
+                    model_data["AP@50"], 
+                    model_data["AP@75"], 
+                    norm_fps
+                ]
+                plot_values.append(values)
+
+            # Calculate angles for the axes
+            angles = np.linspace(0, 2 * np.pi, num_vars, endpoint=False).tolist()
+            angles += angles[:1] # Close the loop
+
+            # Create the polar plot
+            fig, ax = plt.subplots(figsize=(8, 8), subplot_kw=dict(polar=True))
+
+            # Plot data for each model
+            for i, m_type in enumerate(model_types):
+                values = plot_values[i]
+                values += values[:1] # Close the loop for this model's data
+                
+                model_name = MODEL_NAMES.get(m_type, m_type)
+                color = MODEL_COLORS.get(m_type, "gray")
+                
+                ax.plot(angles, values, linewidth=2, linestyle='solid', label=model_name, color=color)
+                ax.fill(angles, values, color, alpha=0.4)
+
+            # Set up the axes and labels
+            ax.set_xticks(angles[:-1])
+            ax.set_xticklabels(categories)
+            
+            # Set y-axis ticks (adjust range if needed, e.g., if AP > 1 is possible)
+            ax.set_yticks(np.arange(0, 1.1, 0.2))
+            ax.set_ylim(0, 1.1) # Assuming metrics are mostly 0-1
+
+            # Add title and legend
+            plt.title("Model Comparison Radar Chart", size=16, y=1.1)
+            ax.legend(loc='upper right', bbox_to_anchor=(1.3, 1.1))
+
+            # Save and return path
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            output_path = VISUALIZATIONS_DIR / f"radar_comparison_{timestamp}.png"
+            plt.savefig(output_path, dpi=150, bbox_inches='tight')
+            print(f"Radar chart saved to: {output_path}")
+
+            if show_plot:
+                plt.show()
+            else:
+                plt.close(fig)
+                
+            return str(output_path)
+
+        except Exception as e:
+            print(f"Error creating radar chart: {e}")
+            import traceback
+            traceback.print_exc()
+            plt.close('all')
+            return None
+
     def generate_comprehensive_report(self):
         """
         Generate a comprehensive HTML report with all visualizations
@@ -613,6 +712,7 @@ class MetricsVisualizer:
             dashboard_path = self.create_metrics_dashboard(show_plot=False) or ""
             pr_curve_path = self.plot_precision_recall_curves(show_plot=False) or ""
             reliability_path = self.plot_reliability_analysis(show_plot=False) or ""
+            radar_path = self.plot_radar_comparison(show_plot=False) or ""
             
             # Load aggregated data and create trends chart
             aggregated_data = self.load_multiple_results()
@@ -887,6 +987,7 @@ class MetricsVisualizer:
                 pr_curve_path=pr_curve_path,
                 reliability_path=reliability_path,
                 trends_path=trends_path,
+                radar_path=radar_path,
                 model_summary=model_summary,
                 class_data=class_data
             )

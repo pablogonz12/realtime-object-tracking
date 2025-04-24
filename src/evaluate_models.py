@@ -94,6 +94,21 @@ class ModelEvaluator:
         Returns:
             list: List of (image, image_id) tuples
         """
+        # Check if we have the COCO dataset
+        if not COCO_VAL_DIR.exists() or not COCO_ANNOT_FILE.exists():
+            print(f"COCO dataset not found. Downloading {max_images} images...")
+            try:
+                # Import and use DatasetManager to download the dataset
+                from data_sets.dataset_manager import DatasetManager
+                dataset_manager = DatasetManager()
+                dataset_manager.setup_coco(subset_size=max_images)
+                print("Dataset download complete. Now loading images...")
+            except Exception as e:
+                print(f"Error downloading dataset: {e}")
+                import traceback
+                traceback.print_exc()
+                return []
+                
         if not COCO_VAL_DIR.exists():
             print(f"Error: COCO validation directory not found at {COCO_VAL_DIR}")
             return []

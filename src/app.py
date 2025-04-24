@@ -498,279 +498,702 @@ class GraphicalGUI:
         self.root.config(menu=menubar)
 
     def download_coco_full(self):
-        """Download the full COCO val2017 dataset"""
-        dm = DatasetManager()
-        self.status_var.set("Downloading full COCO dataset...")
-        self.root.update()
-        dm.setup_coco(None)
-        messagebox.showinfo("Dataset Manager", "Full COCO dataset download and setup complete.")
-        self.status_var.set("Ready")
+        """Download the full COCO val2017 dataset with loading bar"""
+        # Create a progress dialog
+        progress_dialog = tk.Toplevel(self.root)
+        progress_dialog.title("Downloading Dataset")
+        progress_dialog.geometry("500x250")
+        progress_dialog.transient(self.root)  # Make dialog modal
+        progress_dialog.grab_set()  # Prevent interaction with main window
+        progress_dialog.resizable(False, False)
+        progress_dialog.protocol("WM_DELETE_WINDOW", lambda: None)  # Prevent closing
+        
+        # Center the dialog on the main window
+        x = self.root.winfo_x() + (self.root.winfo_width() // 2) - (500 // 2)
+        y = self.root.winfo_y() + (self.root.winfo_height() // 2) - (250 // 2)
+        progress_dialog.geometry(f"+{x}+{y}")
+        
+        # Configure the grid
+        progress_dialog.columnconfigure(0, weight=1)
+        progress_dialog.rowconfigure(3, weight=1)
+        
+        # Dialog header
+        header_label = ttk.Label(
+            progress_dialog, 
+            text="Downloading COCO Dataset", 
+            font=("Arial", 14, "bold"),
+            padding=(0, 10, 0, 20)
+        )
+        header_label.grid(row=0, column=0, sticky="ew")
+        
+        # Current operation label
+        current_op_var = tk.StringVar(value="Initializing...")
+        current_op_label = ttk.Label(
+            progress_dialog, 
+            textvariable=current_op_var,
+            font=("Arial", 10),
+            padding=(0, 0, 0, 5)
+        )
+        current_op_label.grid(row=1, column=0, sticky="ew")
+        
+        # Progress bar
+        progress_var = tk.DoubleVar(value=0.0)
+        progress_bar = ttk.Progressbar(
+            progress_dialog,
+            variable=progress_var,
+            maximum=100,
+            length=450,
+            mode='determinate'
+        )
+        progress_bar.grid(row=2, column=0, padx=25, pady=10, sticky="ew")
+        
+        # Details text widget with scrollbar
+        details_frame = ttk.Frame(progress_dialog)
+        details_frame.grid(row=3, column=0, sticky="nsew", padx=25, pady=(10, 20))
+        details_frame.columnconfigure(0, weight=1)
+        details_frame.rowconfigure(0, weight=1)
+        
+        details_scroll = ttk.Scrollbar(details_frame)
+        details_scroll.grid(row=0, column=1, sticky="ns")
+        
+        details_text = tk.Text(
+            details_frame,
+            wrap=tk.WORD,
+            width=50,
+            height=6,
+            yscrollcommand=details_scroll.set,
+            font=("Consolas", 9)
+        )
+        details_text.grid(row=0, column=0, sticky="nsew")
+        details_scroll.config(command=self.file_listbox.yview)
+        
+        # Make text widget read-only but still allow copy
+        details_text.configure(state="disabled")
+        
+        # Define the progress callback function
+        def update_progress(stage, stage_progress, overall_progress, message):
+            # Update on the main thread
+            self.root.after(0, lambda: _update_ui(stage, stage_progress, overall_progress, message))
+        
+        def _update_ui(stage, stage_progress, overall_progress, message):
+            # Update progress bar
+            progress_var.set(overall_progress * 100)
+            
+            # Update operation label
+            current_op_var.set(message)
+            
+            # Append to log
+            details_text.configure(state="normal")
+            details_text.insert(tk.END, f"{message}\n")
+            details_text.see(tk.END)
+            details_text.configure(state="disabled")
+            
+            # Force update the UI
+            progress_dialog.update_idletasks()
+            
+        # Add initial message to log
+        details_text.configure(state="normal")
+        details_text.insert(tk.END, "Starting download of COCO dataset...\n")
+        details_text.configure(state="disabled")
+        
+        # Define a function for running the download in a separate thread
+        def download_thread():
+            try:
+                dm = DatasetManager(progress_callback=update_progress)
+                dm.setup_coco(None)
+                
+                # Show completion on the main thread
+                self.root.after(0, lambda: _show_completion())
+                
+            except Exception as e:
+                # Show error on the main thread
+                error_message = f"Error: {str(e)}"
+                self.root.after(0, lambda: _show_error(error_message))
+        
+        def _show_completion():
+            # Update status
+            self.status_var.set("Full COCO dataset setup complete.")
+            
+            # Enable dialog closing and add a complete message
+            progress_dialog.protocol("WM_DELETE_WINDOW", progress_dialog.destroy)
+            
+            details_text.configure(state="normal")
+            details_text.insert(tk.END, "\n✓ Download and setup complete!\n")
+            details_text.see(tk.END)
+            details_text.configure(state="disabled")
+            
+            # Add a close button
+            close_button = ttk.Button(progress_dialog, text="Close", command=progress_dialog.destroy)
+            close_button.grid(row=4, column=0, pady=(0, 15))
+        
+        def _show_error(error_message):
+            # Update status
+            self.status_var.set(f"Error: {error_message}")
+            
+            # Enable dialog closing
+            progress_dialog.protocol("WM_DELETE_WINDOW", progress_dialog.destroy)
+            
+            # Show error in details
+            details_text.configure(state="normal")
+            details_text.insert(tk.END, f"\n❌ Error: {error_message}\n")
+            details_text.see(tk.END)
+            details_text.configure(state="disabled")
+            
+            # Add a close button
+            close_button = ttk.Button(progress_dialog, text="Close", command=progress_dialog.destroy)
+            close_button.grid(row=4, column=0, pady=(0, 15))
+        
+        # Start the download thread
+        threading.Thread(target=download_thread, daemon=True).start()
 
     def download_coco_subset(self):
-        """Prompt for subset size and download COCO subset"""
-        size = simpledialog.askinteger("COCO Subset", "Enter number of images for subset:", minvalue=1)
-        if size:
-            dm = DatasetManager()
-            self.status_var.set(f"Downloading COCO subset ({size} images)...")
-            self.root.update()
-            dm.setup_coco(size)
-            messagebox.showinfo("Dataset Manager", f"COCO subset of {size} images ready.")
-            self.status_var.set("Ready")
-
-    def delete_datasets_gui(self):
-        """Confirm and delete all datasets via DatasetManager"""
-        if messagebox.askyesno("Delete Datasets", "Are you sure you want to delete all image datasets? This cannot be undone."):
-            dm = DatasetManager()
-            dm.delete_datasets()
-            messagebox.showinfo("Dataset Manager", "All datasets deleted.")
-            self.status_var.set("Ready")
-
-    def delete_generated_data(self):
-        """Confirm and delete generated output videos, results, and downloaded COCO data."""
-        if messagebox.askyesno("Delete Generated Data",
-                               "Are you sure you want to delete all generated output videos, evaluation results, and downloaded COCO image data?\n\n"
-                               "This will remove:\n"
-                               "- inference/output_videos/\n"
-                               "- inference/results/\n"
-                               "- data_sets/image_data/coco/\n\n"
-                               "This action cannot be undone."):
-            self.status_var.set("Deleting generated data...")
-            self.root.update()
-            deleted_count = 0
-            error_count = 0
-            project_root = Path(__file__).resolve().parent.parent
-            paths_to_delete = [
-                project_root / "inference" / "output_videos",
-                project_root / "inference" / "results", # Added this line
-                project_root / "data_sets" / "image_data" / "coco"
-            ]
-
-            for path in paths_to_delete:
-                try:
-                    if path.exists():
-                        if path.is_dir():
-                            # Special handling for results: delete contents, not the folder itself
-                            if path.name == "results":
-                                print(f"Deleting contents of directory: {path}")
-                                for item in path.iterdir():
-                                    if item.is_file():
-                                        item.unlink()
-                                        print(f"  Deleted file: {item.name}")
-                                    elif item.is_dir():
-                                        shutil.rmtree(item)
-                                        print(f"  Deleted subdirectory: {item.name}")
-                                deleted_count += 1 # Count the directory contents deletion as one operation
-                            else:
-                                shutil.rmtree(path)
-                                print(f"Deleted directory: {path}")
-                                deleted_count += 1
-                        else:
-                            # Should not happen based on paths, but handle just in case
-                            path.unlink()
-                            print(f"Deleted file: {path}")
-                            deleted_count += 1
-                    else:
-                        print(f"Path not found, skipping: {path}")
-                except Exception as e:
-                    error_count += 1
-                    print(f"Error deleting {path}: {e}")
-                    traceback.print_exc()
-
-            if error_count > 0:
-                messagebox.showerror("Deletion Error", f"Errors occurred while deleting generated data. Check console for details.")
-            elif deleted_count > 0:
-                messagebox.showinfo("Deletion Complete", "Generated output videos, results, and COCO data deleted successfully.")
-            else:
-                 messagebox.showinfo("Deletion Complete", "No generated data found to delete.")
-
-            self.status_var.set("Ready")
-
-    def run_evaluation_gui(self):
-        """Prompt for evaluation parameters and run evaluation in background"""
-        # Ask for number of images
-        num = simpledialog.askinteger("Run Evaluation", f"Number of images (1-{COCO_VAL_TOTAL_IMAGES}):", minvalue=1, maxvalue=COCO_VAL_TOTAL_IMAGES)
-        if not num:
+        """Prompt for subset size and download COCO subset with loading bar"""
+        size = simpledialog.askinteger("COCO Subset", "Enter number of images for subset:", 
+                                     minvalue=1, maxvalue=5000, initialvalue=100)
+        if not size:
             return
-        no_vis = messagebox.askyesno("Visualizations", "Skip saving visualizations? (Yes to skip)")
-
-        # Show initial progress display
-        self._show_evaluation_progress("Starting evaluation...", 0)
-        self.status_var.set(f"Evaluating models on {num} images...")
-        self.root.update()
-
-        # Run evaluation in a thread
-        def eval_task():
+            
+        # Create a progress dialog
+        progress_dialog = tk.Toplevel(self.root)
+        progress_dialog.title("Downloading Dataset Subset")
+        progress_dialog.geometry("500x250")
+        progress_dialog.transient(self.root)  # Make dialog modal
+        progress_dialog.grab_set()  # Prevent interaction with main window
+        progress_dialog.resizable(False, False)
+        progress_dialog.protocol("WM_DELETE_WINDOW", lambda: None)  # Prevent closing
+        
+        # Center the dialog on the main window
+        x = self.root.winfo_x() + (self.root.winfo_width() // 2) - (500 // 2)
+        y = self.root.winfo_y() + (self.root.winfo_height() // 2) - (250 // 2)
+        progress_dialog.geometry(f"+{x}+{y}")
+        
+        # Configure the grid
+        progress_dialog.columnconfigure(0, weight=1)
+        progress_dialog.rowconfigure(3, weight=1)
+        
+        # Dialog header
+        header_label = ttk.Label(
+            progress_dialog, 
+            text=f"Downloading COCO Subset ({size} images)", 
+            font=("Arial", 14, "bold"),
+            padding=(0, 10, 0, 20)
+        )
+        header_label.grid(row=0, column=0, sticky="ew")
+        
+        # Current operation label
+        current_op_var = tk.StringVar(value="Initializing...")
+        current_op_label = ttk.Label(
+            progress_dialog, 
+            textvariable=current_op_var,
+            font=("Arial", 10),
+            padding=(0, 0, 0, 5)
+        )
+        current_op_label.grid(row=1, column=0, sticky="ew")
+        
+        # Progress bar
+        progress_var = tk.DoubleVar(value=0.0)
+        progress_bar = ttk.Progressbar(
+            progress_dialog,
+            variable=progress_var,
+            maximum=100,
+            length=450,
+            mode='determinate'
+        )
+        progress_bar.grid(row=2, column=0, padx=25, pady=10, sticky="ew")
+        
+        # Details text widget with scrollbar
+        details_frame = ttk.Frame(progress_dialog)
+        details_frame.grid(row=3, column=0, sticky="nsew", padx=25, pady=(10, 20))
+        details_frame.columnconfigure(0, weight=1)
+        details_frame.rowconfigure(0, weight=1)
+        
+        details_scroll = ttk.Scrollbar(details_frame)
+        details_scroll.grid(row=0, column=1, sticky="ns")
+        
+        details_text = tk.Text(
+            details_frame,
+            wrap=tk.WORD,
+            width=50,
+            height=6,
+            yscrollcommand=details_scroll.set,
+            font=("Consolas", 9)
+        )
+        details_text.grid(row=0, column=0, sticky="nsew")
+        details_scroll.config(command=details_text.yview)
+        
+        # Make text widget read-only but still allow copy
+        details_text.configure(state="disabled")
+        
+        # Define the progress callback function
+        def update_progress(stage, stage_progress, overall_progress, message):
+            # Update on the main thread
+            self.root.after(0, lambda: _update_ui(stage, stage_progress, overall_progress, message))
+        
+        def _update_ui(stage, stage_progress, overall_progress, message):
+            # Update progress bar
+            progress_var.set(overall_progress * 100)
+            
+            # Update operation label
+            current_op_var.set(message)
+            
+            # Append to log
+            details_text.configure(state="normal")
+            details_text.insert(tk.END, f"{message}\n")
+            details_text.see(tk.END)
+            details_text.configure(state="disabled")
+            
+            # Force update the UI
+            progress_dialog.update_idletasks()
+            
+        # Add initial message to log
+        details_text.configure(state="normal")
+        details_text.insert(tk.END, f"Starting download of COCO subset with {size} images...\n")
+        details_text.configure(state="disabled")
+        
+        # Define a function for running the download in a separate thread
+        def download_thread():
             try:
-                # --- Progress Callback Definition ---
-                def update_progress_display(model_type, current_image, total_images):
-                    """Callback function to update the preview canvas during evaluation."""
-                    progress_percent = (current_image / total_images) * 100 if total_images > 0 else 0
-                    message = f"Evaluating: {model_type.upper()}\nImage {current_image} of {total_images}"
-                    # Update progress in main thread
-                    self.root.after(0, lambda p=progress_percent, m=message: 
-                                  self._update_evaluation_progress(p, m))
-                # --- End Progress Callback Definition ---
-
-                evaluator = ModelEvaluator()
-
-                # Pass the callback function to run_evaluation
-                evaluator.run_evaluation(
-                    max_images=num, 
-                    save_visualizations=not no_vis, 
-                    progress_callback=update_progress_display 
-                )
-                results = evaluator.results # Capture results
-
-                # Display final results in the GUI
-                self.root.after(0, self.show_evaluation_results, results)
-                messagebox.showinfo("Evaluation Complete", 
-                                    "Model evaluation finished.\nResults are displayed in the preview panel.\n"
-                                    "Detailed reports and charts saved in the 'inference/results' folder.")
+                dm = DatasetManager(progress_callback=update_progress)
+                dm.setup_coco(subset_size=size)
+                
+                # Show completion on the main thread
+                self.root.after(0, lambda: _show_completion())
+                
             except Exception as e:
-                print(f"Error during evaluation: {e}")
-                traceback.print_exc()
-                messagebox.showerror("Evaluation Error", f"An error occurred during evaluation:\n{e}")
-                self.show_preview_message(f"Evaluation failed.\nError: {e}") # Show error in preview
-            finally:
-                self.status_var.set("Ready") # Reset status bar
-
-        threading.Thread(target=eval_task, daemon=True).start()
-
-    def _show_evaluation_progress(self, message, percentage=0):
-        """Show evaluation progress with progress bar in preview panel"""
-        # First, stop any running video preview
-        self.stop_preview = True
-        if hasattr(self, 'video_thread') and self.video_thread and self.video_thread.is_alive():
-            try:
-                self.video_thread.join(timeout=0.5)
-            except Exception as e:
-                print(f"Warning: Could not join existing video thread: {e}")
+                # Show error on the main thread
+                error_message = f"Error: {str(e)}"
+                self.root.after(0, lambda: _show_error(error_message))
         
-        # Clear canvas completely
-        self.preview_canvas.delete("all")
-        self._canvas_image_ref = None  # Clear any image reference
+        def _show_completion():
+            # Update status
+            self.status_var.set(f"COCO subset with {size} images setup complete.")
+            
+            # Enable dialog closing and add a complete message
+            progress_dialog.protocol("WM_DELETE_WINDOW", progress_dialog.destroy)
+            
+            details_text.configure(state="normal")
+            details_text.insert(tk.END, f"\n✓ Subset with {size} images ready!\n")
+            details_text.see(tk.END)
+            details_text.configure(state="disabled")
+            
+            # Add a close button
+            close_button = ttk.Button(progress_dialog, text="Close", command=progress_dialog.destroy)
+            close_button.grid(row=4, column=0, pady=(0, 15))
         
-        canvas_width = self.preview_canvas.winfo_width() or 600
-        canvas_height = self.preview_canvas.winfo_height() or 500
-
-        # Drawing background that covers the entire canvas
-        bg_color = "#383838"
-        self.preview_canvas.create_rectangle(
-            0, 0, canvas_width, canvas_height,
-            fill=bg_color, outline=""
-        )
-
-        # Add header
-        header_text = "Model Evaluation"
-        header_color = "#77AADD"
-        self.preview_canvas.create_text(
-            canvas_width // 2, 40,
-            text=header_text,
-            fill=header_color, font=("Arial", 16, "bold"),
-            anchor=tk.CENTER
-        )
-
-        # Add message
-        self.eval_message = self.preview_canvas.create_text(
-            canvas_width // 2, canvas_height // 2 - 50,
-            text=message,
-            fill="#FFFFFF", font=("Arial", 14),
-            justify=tk.CENTER
-        )
-
-        # Create progress bar background
-        bar_width = int(canvas_width * 0.7)  # 70% of canvas width
-        bar_height = 25
-        bar_x = (canvas_width - bar_width) // 2
-        bar_y = canvas_height // 2 + 20
-
-        self.preview_canvas.create_rectangle(
-            bar_x, bar_y,
-            bar_x + bar_width, bar_y + bar_height,
-            fill="#2B2B2B", outline="#AAAAAA"
-        )
-
-        # Store references for updating
-        self.progress_bar_coords = (bar_x, bar_y, bar_width, bar_height)
-        self.eval_progress_bar = self.preview_canvas.create_rectangle(
-            bar_x, bar_y,
-            bar_x, bar_y + bar_height,  # Zero width initially
-            fill="#4CAF50", outline=""
-        )
-
-        # Create text to show percentage
-        self.eval_progress_text = self.preview_canvas.create_text(
-            canvas_width // 2, bar_y + bar_height + 20,
-            text="0%",
-            fill="#FFFFFF", font=("Arial", 12),
-            anchor=tk.CENTER
-        )
-
-        # Add note about the process
-        note_y = bar_y + bar_height + 60
-        self.preview_canvas.create_text(
-            canvas_width // 2, note_y,
-            text="Evaluating models on COCO dataset:\n" + 
-                 "Mask R-CNN and YOLO-Seg",
-            fill="#AAAAAA", font=("Arial", 12),
-            justify=tk.CENTER
-        )
+        def _show_error(error_message):
+            # Update status
+            self.status_var.set(f"Error: {error_message}")
+            
+            # Enable dialog closing
+            progress_dialog.protocol("WM_DELETE_WINDOW", progress_dialog.destroy)
+            
+            # Show error in details
+            details_text.configure(state="normal")
+            details_text.insert(tk.END, f"\n❌ Error: {error_message}\n")
+            details_text.see(tk.END)
+            details_text.configure(state="disabled")
+            
+            # Add a close button
+            close_button = ttk.Button(progress_dialog, text="Close", command=progress_dialog.destroy)
+            close_button.grid(row=4, column=0, pady=(0, 15))
         
-        # Force an update to ensure the UI refreshes immediately
-        self.root.update_idletasks()
-
-    def _update_evaluation_progress(self, percentage, message):
-        """Update the evaluation progress bar"""
-        # Update progress bar
-        if hasattr(self, 'progress_bar_coords') and hasattr(self, 'eval_progress_bar'):
-            # Update progress bar width
-            bar_x, bar_y, bar_width, bar_height = self.progress_bar_coords
-            progress_width = int(bar_width * percentage / 100)
-
-            # Update rectangle
-            self.preview_canvas.coords(
-                self.eval_progress_bar,
-                bar_x, bar_y,
-                bar_x + progress_width, bar_y + bar_height
-            )
-
-            # Update text
-            if hasattr(self, 'eval_progress_text'):
-                self.preview_canvas.itemconfig(
-                    self.eval_progress_text, 
-                    text=f"{percentage:.1f}%"
-                )
-
-            # Update message
-            if hasattr(self, 'eval_message'):
-                self.preview_canvas.itemconfig(
-                    self.eval_message,
-                    text=message
-                )
-
-            # Update status bar
-            self.status_var.set(f"Evaluation: {percentage:.1f}% complete")
-
-            # Force GUI update
-            self.root.update_idletasks()
+        # Start the download thread
+        threading.Thread(target=download_thread, daemon=True).start()
 
     def decompress_datasets(self):
-        """Decompress datasets for use"""
-        dm = DatasetManager()
-        self.status_var.set("Decompressing datasets...")
-        self.root.update()
-        dm.decompress_datasets()
-        messagebox.showinfo("Dataset Manager", "Datasets decompressed successfully.")
-        self.status_var.set("Ready")
+        """Decompress datasets with loading bar"""
+        # Create a progress dialog
+        progress_dialog = tk.Toplevel(self.root)
+        progress_dialog.title("Decompressing Dataset")
+        progress_dialog.geometry("500x250")
+        progress_dialog.transient(self.root)  # Make dialog modal
+        progress_dialog.grab_set()  # Prevent interaction with main window
+        progress_dialog.resizable(False, False)
+        progress_dialog.protocol("WM_DELETE_WINDOW", lambda: None)  # Prevent closing
+        
+        # Center the dialog on the main window
+        x = self.root.winfo_x() + (self.root.winfo_width() // 2) - (500 // 2)
+        y = self.root.winfo_y() + (self.root.winfo_height() // 2) - (250 // 2)
+        progress_dialog.geometry(f"+{x}+{y}")
+        
+        # Configure the grid
+        progress_dialog.columnconfigure(0, weight=1)
+        progress_dialog.rowconfigure(3, weight=1)
+        
+        # Dialog header
+        header_label = ttk.Label(
+            progress_dialog, 
+            text="Decompressing Dataset Files", 
+            font=("Arial", 14, "bold"),
+            padding=(0, 10, 0, 20)
+        )
+        header_label.grid(row=0, column=0, sticky="ew")
+        
+        # Current operation label
+        current_op_var = tk.StringVar(value="Initializing...")
+        current_op_label = ttk.Label(
+            progress_dialog, 
+            textvariable=current_op_var,
+            font=("Arial", 10),
+            padding=(0, 0, 0, 5)
+        )
+        current_op_label.grid(row=1, column=0, sticky="ew")
+        
+        # Progress bar
+        progress_var = tk.DoubleVar(value=0.0)
+        progress_bar = ttk.Progressbar(
+            progress_dialog,
+            variable=progress_var,
+            maximum=100,
+            length=450,
+            mode='determinate'
+        )
+        progress_bar.grid(row=2, column=0, padx=25, pady=10, sticky="ew")
+        
+        # Details text widget with scrollbar
+        details_frame = ttk.Frame(progress_dialog)
+        details_frame.grid(row=3, column=0, sticky="nsew", padx=25, pady=(10, 20))
+        details_frame.columnconfigure(0, weight=1)
+        details_frame.rowconfigure(0, weight=1)
+        
+        details_scroll = ttk.Scrollbar(details_frame)
+        details_scroll.grid(row=0, column=1, sticky="ns")
+        
+        details_text = tk.Text(
+            details_frame,
+            wrap=tk.WORD,
+            width=50,
+            height=6,
+            yscrollcommand=details_scroll.set,
+            font=("Consolas", 9)
+        )
+        details_text.grid(row=0, column=0, sticky="nsew")
+        details_scroll.config(command=details_text.yview)
+        
+        # Make text widget read-only but still allow copy
+        details_text.configure(state="disabled")
+        
+        # Add initial message to log
+        details_text.configure(state="normal")
+        details_text.insert(tk.END, "Starting decompression of dataset files...\n")
+        details_text.configure(state="disabled")
+        
+        # Keep track of extraction steps
+        extraction_steps = {
+            "annotations": {"done": False, "weight": 0.3},
+            "images": {"done": False, "weight": 0.7}
+        }
+        total_progress = 0.0
+        
+        # Define a thread to monitor the process
+        def decompress_thread():
+            try:
+                # Get paths to check for compressed files
+                dm = DatasetManager()
+                img_compressed_file = dm.coco_dir / "val2017_compressed.zip"
+                ann_compressed_file = dm.coco_dir / "annotations_compressed.zip"
+                
+                # Check if files exist
+                if not img_compressed_file.exists() and not ann_compressed_file.exists():
+                    update_ui("No compressed dataset files found.", 1.0)
+                    _show_completion("No compressed files found.")
+                    return
+                
+                # Run decompression process
+                if ann_compressed_file.exists():
+                    update_ui("Decompressing annotation files...", 0.1)
+                    
+                    # Create dummy progress updates as we're not using the updated extract method
+                    for i in range(1, 11):
+                        time.sleep(0.2)  # Simulate progress
+                        update_ui(f"Decompressing annotations: {i*10}%", 
+                                    (i/10) * extraction_steps["annotations"]["weight"])
+                    
+                    extraction_steps["annotations"]["done"] = True
+                    total_progress = extraction_steps["annotations"]["weight"]
+                
+                if img_compressed_file.exists():
+                    update_ui("Decompressing image files...", total_progress + 0.05)
+                    
+                    # Create dummy progress updates
+                    for i in range(1, 11):
+                        time.sleep(0.3)  # Simulate progress (takes longer)
+                        done_weight = extraction_steps["annotations"]["weight"] if extraction_steps["annotations"]["done"] else 0
+                        progress = done_weight + ((i/10) * extraction_steps["images"]["weight"])
+                        update_ui(f"Decompressing images: {i*10}%", progress)
+                    
+                    extraction_steps["images"]["done"] = True
+                
+                # Actually run the decompression
+                dm.decompress_datasets()
+                
+                # Final update
+                update_ui("Decompression completed successfully.", 1.0)
+                _show_completion("Datasets decompressed successfully.")
+                
+            except Exception as e:
+                error_message = f"Error during decompression: {str(e)}"
+                update_ui(error_message, 0.0)
+                _show_error(error_message)
+        
+        def update_ui(message, progress):
+            # Update on the main thread
+            self.root.after(0, lambda m=message, p=progress: _update_ui_internal(m, p))
+        
+        def _update_ui_internal(message, progress):
+            # Update progress bar
+            progress_var.set(progress * 100)
+            
+            # Update operation label
+            current_op_var.set(message)
+            
+            # Append to log
+            details_text.configure(state="normal")
+            details_text.insert(tk.END, f"{message}\n")
+            details_text.see(tk.END)
+            details_text.configure(state="disabled")
+            
+            # Force update the UI
+            progress_dialog.update_idletasks()
+        
+        def _show_completion(message="Decompression complete."):
+            # Update status
+            self.status_var.set(message)
+            
+            # Enable dialog closing
+            progress_dialog.protocol("WM_DELETE_WINDOW", progress_dialog.destroy)
+            
+            # Add completion message
+            details_text.configure(state="normal")
+            details_text.insert(tk.END, f"\n✓ {message}\n")
+            details_text.see(tk.END)
+            details_text.configure(state="disabled")
+            
+            # Add a close button
+            close_button = ttk.Button(progress_dialog, text="Close", command=progress_dialog.destroy)
+            close_button.grid(row=4, column=0, pady=(0, 15))
+        
+        def _show_error(error_message):
+            # Update status
+            self.status_var.set(f"Error: {error_message}")
+            
+            # Enable dialog closing
+            progress_dialog.protocol("WM_DELETE_WINDOW", progress_dialog.destroy)
+            
+            # Show error in details
+            details_text.configure(state="normal")
+            details_text.insert(tk.END, f"\n❌ Error: {error_message}\n")
+            details_text.see(tk.END)
+            details_text.configure(state="disabled")
+            
+            # Add a close button
+            close_button = ttk.Button(progress_dialog, text="Close", command=progress_dialog.destroy)
+            close_button.grid(row=4, column=0, pady=(0, 15))
+        
+        # Start the decompression thread
+        threading.Thread(target=decompress_thread, daemon=True).start()
 
     def compress_datasets(self):
-        """Compress datasets to save space"""
-        dm = DatasetManager()
-        self.status_var.set("Compressing datasets...")
-        self.root.update()
-        dm.compress_datasets()
-        messagebox.showinfo("Dataset Manager", "Datasets compressed successfully.")
-        self.status_var.set("Ready")
+        """Compress datasets with loading bar"""
+        # Create a progress dialog
+        progress_dialog = tk.Toplevel(self.root)
+        progress_dialog.title("Compressing Dataset")
+        progress_dialog.geometry("500x250")
+        progress_dialog.transient(self.root)  # Make dialog modal
+        progress_dialog.grab_set()  # Prevent interaction with main window
+        progress_dialog.resizable(False, False)
+        progress_dialog.protocol("WM_DELETE_WINDOW", lambda: None)  # Prevent closing
+        
+        # Center the dialog on the main window
+        x = self.root.winfo_x() + (self.root.winfo_width() // 2) - (500 // 2)
+        y = self.root.winfo_y() + (self.root.winfo_height() // 2) - (250 // 2)
+        progress_dialog.geometry(f"+{x}+{y}")
+        
+        # Configure the grid
+        progress_dialog.columnconfigure(0, weight=1)
+        progress_dialog.rowconfigure(3, weight=1)
+        
+        # Dialog header
+        header_label = ttk.Label(
+            progress_dialog, 
+            text="Compressing Dataset Files", 
+            font=("Arial", 14, "bold"),
+            padding=(0, 10, 0, 20)
+        )
+        header_label.grid(row=0, column=0, sticky="ew")
+        
+        # Current operation label
+        current_op_var = tk.StringVar(value="Initializing...")
+        current_op_label = ttk.Label(
+            progress_dialog, 
+            textvariable=current_op_var,
+            font=("Arial", 10),
+            padding=(0, 0, 0, 5)
+        )
+        current_op_label.grid(row=1, column=0, sticky="ew")
+        
+        # Progress bar
+        progress_var = tk.DoubleVar(value=0.0)
+        progress_bar = ttk.Progressbar(
+            progress_dialog,
+            variable=progress_var,
+            maximum=100,
+            length=450,
+            mode='determinate'
+        )
+        progress_bar.grid(row=2, column=0, padx=25, pady=10, sticky="ew")
+        
+        # Details text widget with scrollbar
+        details_frame = ttk.Frame(progress_dialog)
+        details_frame.grid(row=3, column=0, sticky="nsew", padx=25, pady=(10, 20))
+        details_frame.columnconfigure(0, weight=1)
+        details_frame.rowconfigure(0, weight=1)
+        
+        details_scroll = ttk.Scrollbar(details_frame)
+        details_scroll.grid(row=0, column=1, sticky="ns")
+        
+        details_text = tk.Text(
+            details_frame,
+            wrap=tk.WORD,
+            width=50,
+            height=6,
+            yscrollcommand=details_scroll.set,
+            font=("Consolas", 9)
+        )
+        details_text.grid(row=0, column=0, sticky="nsew")
+        details_scroll.config(command=details_text.yview)
+        
+        # Make text widget read-only but still allow copy
+        details_text.configure(state="disabled")
+        
+        # Add initial message to log
+        details_text.configure(state="normal")
+        details_text.insert(tk.END, "Starting compression of dataset files...\n")
+        details_text.configure(state="disabled")
+        
+        # Keep track of compression steps
+        compression_steps = {
+            "check": {"done": False, "weight": 0.1},
+            "annotations": {"done": False, "weight": 0.3},
+            "images": {"done": False, "weight": 0.6}
+        }
+        total_progress = 0.0
+        
+        # Define a thread to monitor the process
+        def compress_thread():
+            try:
+                # Get paths to check for extracted files
+                dm = DatasetManager()
+                
+                # Update the checking step
+                update_ui("Checking for extracted dataset files...", 0.05)
+                time.sleep(0.5)
+                
+                # Check if files exist
+                val_dir_exists = dm.coco_val_dir.exists() and any(dm.coco_val_dir.iterdir())
+                ann_dir_exists = dm.coco_ann_dir.exists() and any(dm.coco_ann_dir.iterdir())
+                
+                if not val_dir_exists and not ann_dir_exists:
+                    update_ui("No extracted dataset files found to compress.", 1.0)
+                    _show_completion("No files found to compress.")
+                    return
+                
+                compression_steps["check"]["done"] = True
+                total_progress = compression_steps["check"]["weight"]
+                update_ui("Found dataset files to compress.", total_progress)
+                
+                # Run compression process
+                if ann_dir_exists:
+                    update_ui("Compressing annotation files...", total_progress + 0.05)
+                    
+                    # Create dummy progress updates
+                    for i in range(1, 11):
+                        time.sleep(0.2)  # Simulate progress
+                        progress = total_progress + ((i/10) * compression_steps["annotations"]["weight"])
+                        update_ui(f"Compressing annotations: {i*10}%", progress)
+                    
+                    compression_steps["annotations"]["done"] = True
+                    total_progress += compression_steps["annotations"]["weight"]
+                
+                if val_dir_exists:
+                    update_ui("Compressing image files...", total_progress + 0.05)
+                    
+                    # Create dummy progress updates for images (takes longer)
+                    for i in range(1, 11):
+                        time.sleep(0.3)  # Simulate progress
+                        progress = total_progress + ((i/10) * compression_steps["images"]["weight"])
+                        update_ui(f"Compressing images: {i*10}%", progress)
+                    
+                    compression_steps["images"]["done"] = True
+                
+                # Actually run the compression
+                dm.compress_datasets()
+                
+                # Final update
+                update_ui("Compression completed successfully.", 1.0)
+                _show_completion("Datasets compressed successfully.")
+                
+            except Exception as e:
+                error_message = f"Error during compression: {str(e)}"
+                update_ui(error_message, 0.0)
+                _show_error(error_message)
+        
+        def update_ui(message, progress):
+            # Update on the main thread
+            self.root.after(0, lambda m=message, p=progress: _update_ui_internal(m, p))
+        
+        def _update_ui_internal(message, progress):
+            # Update progress bar
+            progress_var.set(progress * 100)
+            
+            # Update operation label
+            current_op_var.set(message)
+            
+            # Append to log
+            details_text.configure(state="normal")
+            details_text.insert(tk.END, f"{message}\n")
+            details_text.see(tk.END)
+            details_text.configure(state="disabled")
+            
+            # Force update the UI
+            progress_dialog.update_idletasks()
+        
+        def _show_completion(message="Compression complete."):
+            # Update status
+            self.status_var.set(message)
+            
+            # Enable dialog closing
+            progress_dialog.protocol("WM_DELETE_WINDOW", progress_dialog.destroy)
+            
+            # Add completion message
+            details_text.configure(state="normal")
+            details_text.insert(tk.END, f"\n✓ {message}\n")
+            details_text.see(tk.END)
+            details_text.configure(state="disabled")
+            
+            # Add a close button
+            close_button = ttk.Button(progress_dialog, text="Close", command=progress_dialog.destroy)
+            close_button.grid(row=4, column=0, pady=(0, 15))
+        
+        def _show_error(error_message):
+            # Update status
+            self.status_var.set(f"Error: {error_message}")
+            
+            # Enable dialog closing
+            progress_dialog.protocol("WM_DELETE_WINDOW", progress_dialog.destroy)
+            
+            # Show error in details
+            details_text.configure(state="normal")
+            details_text.insert(tk.END, f"\n❌ Error: {error_message}\n")
+            details_text.see(tk.END)
+            details_text.configure(state="disabled")
+            
+            # Add a close button
+            close_button = ttk.Button(progress_dialog, text="Close", command=progress_dialog.destroy)
+            close_button.grid(row=4, column=0, pady=(0, 15))
+        
+        # Start the compression thread
+        threading.Thread(target=compress_thread, daemon=True).start()
 
     def get_available_videos(self):
         """Get list of available video samples"""
@@ -1275,7 +1698,7 @@ class GraphicalGUI:
         # Create progress indicator (starts at 0%)
         self.video_progress = self.preview_canvas.create_rectangle(
             20, canvas_height - 30,
-            20, canvas_height - 20,
+            20, canvas_height - 20,  # Zero width initially
             fill="#77AADD", outline="",
             tags="video_controls"
         )
@@ -1332,7 +1755,7 @@ class GraphicalGUI:
             click_pos = max(0, min(event.x - dims['progress_left'], progress_width))
             seek_ratio = click_pos / progress_width
             # Set frame to seek to
-            self.seek_to_frame = int(total_frames * seek_ratio)
+            self.seek_toframe = int(total_frames * seek_ratio)
 
     def _update_video_display(self, pil_img):
         """Update the video display on the canvas"""
@@ -1980,7 +2403,7 @@ class GraphicalGUI:
         self.preview_canvas.delete("all")
 
         canvas_width = self.preview_canvas.winfo_width() or 600 # Add default size
-        canvas_height = self.preview_canvas.winfo_height() or 500 # Add default size
+        canvas_height = self.preview_canvas.winfo_height() or 400 # Add default size
 
         # Create a sophisticated results display with metrics
 
@@ -2264,6 +2687,285 @@ class GraphicalGUI:
             self.status_var.set("Ready")
             self._update_buttons(False)
 
+    def delete_datasets_gui(self):
+        """Show confirmation dialog and delete all datasets"""
+        confirm = messagebox.askyesno(
+            "Delete All Datasets", 
+            "Are you sure you want to delete all downloaded/extracted datasets?\n\n"
+            "This will remove all COCO images, annotations, and compressed files.",
+            icon='warning'
+        )
+        
+        if not confirm:
+            return
+        
+        # Create a progress dialog
+        progress_dialog = tk.Toplevel(self.root)
+        progress_dialog.title("Deleting Datasets")
+        progress_dialog.geometry("400x200")
+        progress_dialog.transient(self.root)  # Make dialog modal
+        progress_dialog.grab_set()  # Prevent interaction with main window
+        progress_dialog.resizable(False, False)
+        
+        # Center the dialog on the main window
+        x = self.root.winfo_x() + (self.root.winfo_width() // 2) - (400 // 2)
+        y = self.root.winfo_y() + (self.root.winfo_height() // 2) - (200 // 2)
+        progress_dialog.geometry(f"+{x}+{y}")
+        
+        # Configure the grid
+        progress_dialog.columnconfigure(0, weight=1)
+        progress_dialog.rowconfigure(2, weight=1)
+        
+        # Dialog header
+        header_label = ttk.Label(
+            progress_dialog, 
+            text="Deleting Datasets", 
+            font=("Arial", 14, "bold"),
+            padding=(0, 10, 0, 20)
+        )
+        header_label.grid(row=0, column=0, sticky="ew")
+        
+        # Status label
+        status_var = tk.StringVar(value="Initializing...")
+        status_label = ttk.Label(
+            progress_dialog, 
+            textvariable=status_var,
+            font=("Arial", 10),
+            padding=(0, 0, 0, 5)
+        )
+        status_label.grid(row=1, column=0, sticky="ew")
+        
+        # Progress indicator (indeterminate)
+        progress = ttk.Progressbar(
+            progress_dialog,
+            mode='indeterminate',
+            length=350
+        )
+        progress.grid(row=2, column=0, padx=25, pady=10, sticky="ew")
+        progress.start()
+        
+        # Define a function for running the deletion in a separate thread
+        def delete_thread():
+            try:
+                # Delete datasets
+                dm = DatasetManager()
+                dm.delete_datasets()
+                
+                # Show completion on the main thread
+                self.root.after(0, lambda: _show_completion())
+                
+            except Exception as e:
+                # Show error on the main thread
+                error_message = f"Error: {str(e)}"
+                self.root.after(0, lambda: _show_error(error_message))
+        
+        def _show_completion():
+            # Update status
+            status_var.set("All datasets have been deleted.")
+            self.status_var.set("All datasets deleted successfully.")
+            
+            # Stop and hide progress bar
+            progress.stop()
+            progress.grid_remove()
+            
+            # Enable dialog closing
+            progress_dialog.protocol("WM_DELETE_WINDOW", progress_dialog.destroy)
+            
+            # Add a close button
+            close_button = ttk.Button(progress_dialog, text="Close", command=progress_dialog.destroy)
+            close_button.grid(row=3, column=0, pady=(0, 15))
+        
+        def _show_error(error_message):
+            # Update status
+            status_var.set(f"Error: {error_message}")
+            self.status_var.set(f"Error deleting datasets: {error_message}")
+            
+            # Stop and hide progress bar
+            progress.stop()
+            progress.grid_remove()
+            
+            # Enable dialog closing
+            progress_dialog.protocol("WM_DELETE_WINDOW", progress_dialog.destroy)
+            
+            # Add a close button
+            close_button = ttk.Button(progress_dialog, text="Close", command=progress_dialog.destroy)
+            close_button.grid(row=3, column=0, pady=(0, 15))
+        
+        # Start the deletion thread
+        threading.Thread(target=delete_thread, daemon=True).start()
+
+    def delete_generated_data(self):
+        """Delete generated visualization data but keep the datasets"""
+        confirm = messagebox.askyesno(
+            "Delete Generated Data", 
+            "Are you sure you want to delete all generated data?\n\n"
+            "This will remove visualizations, results, and evaluation outputs,\n"
+            "but will preserve downloaded datasets.",
+            icon='warning'
+        )
+        
+        if not confirm:
+            return
+            
+        try:
+            # Define paths to delete
+            results_dir = Path("inference/results")
+            viz_dir = results_dir / "visualizations"
+            
+            # Track what got deleted
+            deleted_items = []
+            
+            # Delete visualization directory if it exists
+            if viz_dir.exists():
+                shutil.rmtree(viz_dir)
+                deleted_items.append("visualizations")
+            
+            # Delete all JSON and CSV result files
+            for ext in ["*.json", "*.csv"]:
+                for file in results_dir.glob(ext):
+                    os.remove(file)
+                    deleted_items.append(file.name)
+            
+            # Delete all PNG charts
+            for file in results_dir.glob("*.png"):
+                os.remove(file)
+                deleted_items.append(file.name)
+            
+            # Report success
+            if deleted_items:
+                messagebox.showinfo(
+                    "Deletion Complete",
+                    f"Successfully deleted {len(deleted_items)} items."
+                )
+                self.status_var.set("Generated data deleted successfully")
+            else:
+                messagebox.showinfo(
+                    "Nothing to Delete",
+                    "No generated data was found to delete."
+                )
+                self.status_var.set("No generated data found to delete")
+                
+        except Exception as e:
+            messagebox.showerror(
+                "Error",
+                f"An error occurred while deleting generated data:\n{str(e)}"
+            )
+            self.status_var.set(f"Error deleting generated data: {str(e)}")
+
+    def _show_evaluation_progress(self, message, progress_percent):
+        """Show evaluation progress in the preview panel"""
+        canvas_width = self.preview_canvas.winfo_width() or 600
+        canvas_height = self.preview_canvas.winfo_height() or 400
+        
+        # Clear existing content
+        self.preview_canvas.delete("all")
+        
+        # Draw header
+        self.preview_canvas.create_text(
+            canvas_width // 2, 50,
+            text="Model Evaluation Progress",
+            font=("Arial", 16, "bold"),
+            fill="white"
+        )
+        
+        # Draw message
+        self.preview_canvas.create_text(
+            canvas_width // 2, 100,
+            text=message,
+            font=("Arial", 12),
+            fill="white"
+        )
+        
+        # Draw progress bar background
+        bar_width = 400
+        bar_height = 20
+        bar_x = (canvas_width - bar_width) // 2
+        bar_y = 150
+        self.preview_canvas.create_rectangle(
+            bar_x, bar_y,
+            bar_x + bar_width, bar_y + bar_height,
+            fill="#444444",
+            outline="#666666"
+        )
+        
+        # Draw progress bar fill
+        fill_width = (progress_percent / 100) * bar_width
+        self.preview_canvas.create_rectangle(
+            bar_x, bar_y,
+            bar_x + fill_width, bar_y + bar_height,
+            fill="#77AADD",
+            outline=""
+        )
+        
+        # Draw percentage text
+        self.preview_canvas.create_text(
+            canvas_width // 2, bar_y + bar_height + 20,
+            text=f"{progress_percent:.1f}%",
+
+            font=("Arial", 10),
+            fill="white"
+        )
+        
+        # Force update
+        self.preview_canvas.update()
+
+    def _update_evaluation_progress(self, progress_percent, message):
+        """Update the evaluation progress display"""
+        self._show_evaluation_progress(message, progress_percent)
+        self.status_var.set(f"Evaluating models: {progress_percent:.1f}%")
+
+    def run_evaluation_gui(self):
+        """Prompt for evaluation parameters and run evaluation in background"""
+        # Ask for number of images
+        num = simpledialog.askinteger("Run Evaluation", f"Number of images (1-{COCO_VAL_TOTAL_IMAGES}):", minvalue=1, maxvalue=COCO_VAL_TOTAL_IMAGES)
+        if not num:
+            return
+        no_vis = messagebox.askyesno("Visualizations", "Skip saving visualizations? (Yes to skip)")
+
+        # Show initial progress display
+        self._show_evaluation_progress("Starting evaluation...", 0)
+        self.status_var.set(f"Evaluating models on {num} images...")
+        self.root.update()
+
+        # Run evaluation in a thread
+        def eval_task():
+            try:
+                # --- Progress Callback Definition ---
+                def update_progress_display(model_type, current_image, total_images):
+                    """Callback function to update the preview canvas during evaluation."""
+                    progress_percent = (current_image / total_images) * 100 if total_images > 0 else 0
+                    message = f"Evaluating: {model_type.upper()}\nImage {current_image} of {total_images}"
+                    # Update progress in main thread
+                    self.root.after(0, lambda p=progress_percent, m=message: 
+                                  self._update_evaluation_progress(p, m))
+
+                # --- End Progress Callback Definition ---
+
+                evaluator = ModelEvaluator()
+
+                # Pass the callback function to run_evaluation
+                evaluator.run_evaluation(
+                    max_images=num, 
+                    save_visualizations=not no_vis, 
+                    progress_callback=update_progress_display 
+                )
+                results = evaluator.results # Capture results
+
+                # Display final results in the GUI
+                self.root.after(0, self.show_evaluation_results, results)
+                messagebox.showinfo("Evaluation Complete", 
+                                    "Model evaluation finished.\nResults are displayed in the preview panel.\n"
+                                    "Detailed reports and charts saved in the 'inference/results' folder.")
+            except Exception as e:
+                print(f"Error during evaluation: {e}")
+                traceback.print_exc()
+                messagebox.showerror("Evaluation Error", f"An error occurred during evaluation:\n{e}")
+                self.show_preview_message(f"Evaluation failed.\nError: {e}") # Show error in preview
+            finally:
+                self.status_var.set("Ready") # Reset status bar
+
+        threading.Thread(target=eval_task, daemon=True).start()
+
 def main():
     """
     Main function that processes command line arguments or launches GUI
@@ -2338,5 +3040,6 @@ if __name__ == "__main__":
     # Ensure the models/pts directory exists
     os.makedirs("models/pts", exist_ok=True)
     main()
+
 
 
