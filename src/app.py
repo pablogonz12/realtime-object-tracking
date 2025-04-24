@@ -13,6 +13,7 @@ import os
 import sys
 import time  # Import time module for FPS control and timing
 from pathlib import Path
+import shutil # Import shutil for directory deletion
 
 # Add project root to PYTHONPATH so sibling packages (data_sets, inference) are importable
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -23,12 +24,12 @@ from PIL import Image, ImageTk  # Import PIL for image processing
 from ttkthemes import ThemedTk # Import ThemedTk
 import tkinter.simpledialog as simpledialog  # for input dialogs
 from data_sets.dataset_manager import DatasetManager
-from inference.evaluate_models import ModelEvaluator, COCO_VAL_TOTAL_IMAGES
-from inference.metrics_visualizer import MetricsVisualizer  # Import MetricsVisualizer
+from src.evaluate_models import ModelEvaluator, COCO_VAL_TOTAL_IMAGES
+from src.metrics_visualizer import MetricsVisualizer  # Import MetricsVisualizer
 import pandas as pd # Import pandas for displaying results table
 
 # Import model wrappers directly from consolidated models file
-from models.models import ModelManager # Removed unused YOLOWrapper, RTDETRWrapper, SAMWrapper imports
+from src.models import ModelManager # Removed unused YOLOWrapper, RTDETRWrapper, SAMWrapper imports
 
 # Default model paths for auto-download
 DEFAULT_MODELS = {
@@ -473,6 +474,7 @@ class GraphicalGUI:
         dataset_menu.add_command(label="Compress Datasets", command=self.compress_datasets)
         dataset_menu.add_separator()
         dataset_menu.add_command(label="Delete All Datasets", command=self.delete_datasets_gui)
+        dataset_menu.add_command(label="Delete Generated Data", command=self.delete_generated_data) # Added this line
         menubar.add_cascade(label="Dataset", menu=dataset_menu)
 
         # Evaluation menu
@@ -521,6 +523,52 @@ class GraphicalGUI:
             dm = DatasetManager()
             dm.delete_datasets()
             messagebox.showinfo("Dataset Manager", "All datasets deleted.")
+            self.status_var.set("Ready")
+
+    def delete_generated_data(self):
+        """Confirm and delete generated output videos and downloaded COCO data."""
+        if messagebox.askyesno("Delete Generated Data",
+                               "Are you sure you want to delete all generated output videos and downloaded COCO image data?\n\n"
+                               "This will remove:\n"
+                               "- inference/output_videos/\n"
+                               "- data_sets/image_data/coco/\n\n"
+                               "This action cannot be undone."):
+            self.status_var.set("Deleting generated data...")
+            self.root.update()
+            deleted_count = 0
+            error_count = 0
+            project_root = Path(__file__).resolve().parent.parent
+            paths_to_delete = [
+                project_root / "inference" / "output_videos",
+                project_root / "data_sets" / "image_data" / "coco"
+            ]
+
+            for path in paths_to_delete:
+                try:
+                    if path.exists():
+                        if path.is_dir():
+                            shutil.rmtree(path)
+                            print(f"Deleted directory: {path}")
+                            deleted_count += 1
+                        else:
+                            # Should not happen based on paths, but handle just in case
+                            path.unlink()
+                            print(f"Deleted file: {path}")
+                            deleted_count += 1
+                    else:
+                        print(f"Path not found, skipping: {path}")
+                except Exception as e:
+                    error_count += 1
+                    print(f"Error deleting {path}: {e}")
+                    traceback.print_exc()
+
+            if error_count > 0:
+                messagebox.showerror("Deletion Error", f"Errors occurred while deleting generated data. Check console for details.")
+            elif deleted_count > 0:
+                messagebox.showinfo("Deletion Complete", "Generated output videos and COCO data deleted successfully.")
+            else:
+                 messagebox.showinfo("Deletion Complete", "No generated data found to delete.")
+
             self.status_var.set("Ready")
 
     def run_evaluation_gui(self):
@@ -576,16 +624,26 @@ class GraphicalGUI:
 
     def _show_evaluation_progress(self, message, percentage=0):
         """Show evaluation progress with progress bar in preview panel"""
-        # Clear canvas
+        # First, stop any running video preview
+        self.stop_preview = True
+        if hasattr(self, 'video_thread') and self.video_thread and self.video_thread.is_alive():
+            try:
+                self.video_thread.join(timeout=0.5)
+            except Exception as e:
+                print(f"Warning: Could not join existing video thread: {e}")
+        
+        # Clear canvas completely
         self.preview_canvas.delete("all")
+        self._canvas_image_ref = None  # Clear any image reference
+        
         canvas_width = self.preview_canvas.winfo_width() or 600
         canvas_height = self.preview_canvas.winfo_height() or 500
 
-        # Drawing background
+        # Drawing background that covers the entire canvas
         bg_color = "#383838"
         self.preview_canvas.create_rectangle(
-            10, 10, canvas_width - 10, canvas_height - 10,
-            fill=bg_color, outline="#555555", width=1
+            0, 0, canvas_width, canvas_height,
+            fill=bg_color, outline=""
         )
 
         # Add header
@@ -643,6 +701,9 @@ class GraphicalGUI:
             fill="#AAAAAA", font=("Arial", 12),
             justify=tk.CENTER
         )
+        
+        # Force an update to ensure the UI refreshes immediately
+        self.root.update_idletasks()
 
     def _update_evaluation_progress(self, percentage, message):
         """Update the evaluation progress bar"""
@@ -1402,7 +1463,7 @@ class GraphicalGUI:
         """Thread function for processing webcam frames in real-time with optimizations."""
         try:
             # Import the video utilities
-            from inference.video_utils import process_webcam_with_model
+            from src.video_utils import process_webcam_with_model
 
             # Create events for stopping and pausing
             self.stop_event = threading.Event()
@@ -1648,7 +1709,7 @@ class GraphicalGUI:
         """Thread function for processing video with model"""
         try:
             # Import the video utilities
-            from inference.video_utils import process_video_with_model
+            from src.video_utils import process_video_with_model
 
             # Create events for stopping and pausing
             self.stop_event = threading.Event()
@@ -1726,14 +1787,14 @@ class GraphicalGUI:
     def show_metrics_dashboard(self):
         """Show comprehensive metrics dashboard in a new window"""
         try:
-            from inference.metrics_visualizer import MetricsVisualizer
+            from src.metrics_visualizer import MetricsVisualizer
 
             # Find the latest results file
             self.status_var.set("Loading metrics data...")
             metrics_vis = MetricsVisualizer()  # This will automatically load the latest results
 
             if not metrics_vis.results:
-                messagebox.showerror("Error", "No evaluation results found. Run an evaluation first.")
+                messagebox.showerror("Error", "No evaluation results found. Run an evaluation first.") # Corrected line
                 self.status_var.set("Ready")
                 return
 
@@ -1743,7 +1804,7 @@ class GraphicalGUI:
             output_path = metrics_vis.create_metrics_dashboard(show_plot=False)
 
             if output_path:
-                # Instead of showing the plot interactively, open the saved file with the systemviewer
+                # Instead of showing the plot interactively, open the saved file with the system viewer
                 self.status_var.set(f"Metrics dashboard saved to {output_path}")
                 if messagebox.askyesno("Dashboard Generated", f"Dashboard saved to:\n{output_path}\n\nOpen image now?"):
                     self.open_file(output_path)
@@ -1762,7 +1823,7 @@ class GraphicalGUI:
     def show_precision_recall_curve(self):
         """Show precision-recall curves in a new window"""
         try:
-            from inference.metrics_visualizer import MetricsVisualizer
+            from src.metrics_visualizer import MetricsVisualizer
 
             self.status_var.set("Loading metrics data...")
             metrics_vis = MetricsVisualizer()
@@ -1787,7 +1848,7 @@ class GraphicalGUI:
     def show_reliability_analysis(self):
         """Show reliability analysis visualization in a new window"""
         try:
-            from inference.metrics_visualizer import MetricsVisualizer
+            from src.metrics_visualizer import MetricsVisualizer
 
             self.status_var.set("Loading metrics data...")
             metrics_vis = MetricsVisualizer()
@@ -1812,7 +1873,7 @@ class GraphicalGUI:
     def show_performance_trends(self):
         """Show performance trends over time in a new window"""
         try:
-            from inference.metrics_visualizer import MetricsVisualizer
+            from src.metrics_visualizer import MetricsVisualizer
 
             self.status_var.set("Loading metrics data...")
             # For this one, we need multiple results files to show trends
@@ -1840,7 +1901,7 @@ class GraphicalGUI:
     def generate_metrics_report(self):
         """Generate a comprehensive HTML report with all visualizations"""
         try:
-            from inference.metrics_visualizer import MetricsVisualizer
+            from src.metrics_visualizer import MetricsVisualizer
             import webbrowser
             from pathlib import Path
 
@@ -2050,8 +2111,8 @@ class GraphicalGUI:
         """Run the best model on a test video based on evaluation results"""
         try:
             # Import the pipeline module for best model determination
-            from inference.pipeline import determine_best_model
-            from inference.metrics_visualizer import MetricsVisualizer
+            from src.pipeline import determine_best_model
+            from src.metrics_visualizer import MetricsVisualizer
             import random
             from pathlib import Path
 
@@ -2125,7 +2186,7 @@ class GraphicalGUI:
                 )
 
                 # Get model path from default models
-                from models.models import DEFAULT_MODELS
+                from models import DEFAULT_MODELS
                 model_path = DEFAULT_MODELS.get(best_model)
                 if not model_path or not Path(model_path).exists():
                     messagebox.showerror(
@@ -2136,7 +2197,7 @@ class GraphicalGUI:
 
                 # Initialize the model
                 self.status_var.set(f"Initializing {best_model} model...")
-                from models.models import ModelManager
+                from models import ModelManager
                 model_manager = ModelManager(best_model, model_path)
 
                 # Process the video

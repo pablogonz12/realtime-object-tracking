@@ -34,7 +34,7 @@ from pycocotools import mask as maskUtils
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 # Import model manager
-from models import ModelManager, DEFAULT_MODEL_PATHS
+from src.models import ModelManager, DEFAULT_MODEL_PATHS
 
 # Configure paths
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -712,7 +712,7 @@ def main():
     # Create visualizations if requested
     if args.visualize or args.report:
         try:
-            from inference.metrics_visualizer import MetricsVisualizer
+            from src.metrics_visualizer import MetricsVisualizer
             visualizer = MetricsVisualizer()  # Will automatically use latest results
             
             if args.report:

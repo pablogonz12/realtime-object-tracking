@@ -16,8 +16,8 @@ import argparse
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 # Import model manager and video utilities
-from models import ModelManager, DEFAULT_MODEL_PATHS
-from inference.video_utils import process_video_with_model
+from src.models import ModelManager, DEFAULT_MODEL_PATHS
+from src.video_utils import process_video_with_model
 
 # Configure paths
 PROJECT_ROOT = Path(__file__).resolve().parent.parent

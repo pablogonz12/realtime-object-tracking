@@ -89,11 +89,11 @@ def _download_model_if_needed(model_path: Path):
                     downloaded_size += len(chunk)
                     # Basic progress indication
                     progress = int(50 * downloaded_size / total_size) if total_size else 0
-                    print(f"\\rDownloading: [{'=' * progress}{' ' * (50 - progress)}] {downloaded_size / (1024*1024):.2f} MB / {total_size / (1024*1024):.2f} MB", end='')
-        print(f"\\nModel {model_name} downloaded successfully.")
+                    print(f"\rDownloading: [{'=' * progress}{' ' * (50 - progress)}] {downloaded_size / (1024*1024):.2f} MB / {total_size / (1024*1024):.2f} MB", end='')
+        print(f"\nModel {model_name} downloaded successfully.")
         return True
     except requests.exceptions.RequestException as e:
-        print(f"\\nError downloading model {model_name}: {e}")
+        print(f"\nError downloading model {model_name}: {e}")
         # Clean up potentially incomplete file
         if model_path.exists():
             try:
@@ -103,7 +103,7 @@ def _download_model_if_needed(model_path: Path):
                 print(f"Error removing incomplete file {model_path}: {rm_err}")
         return False
     except Exception as e:
-        print(f"\\nAn unexpected error occurred during download: {e}")
+        print(f"\nAn unexpected error occurred during download: {e}")
         # Clean up potentially incomplete file if it exists
         if model_path.exists():
              try:
@@ -475,7 +475,7 @@ class ModelManager:
                 nvidia_driver_available = True
                 print("NVIDIA drivers detected via nvidia-smi")
                 # Parse nvidia-smi output to get GPU name
-                for line in nvidia_smi.stdout.split('\\n'):
+                for line in nvidia_smi.stdout.split('\n'):
                     if "NVIDIA" in line and ("RTX" in line or "GeForce" in line or "Tesla" in line): # Broader check
                         gpu_name = line.strip()
                         print(f"Found GPU via nvidia-smi: {gpu_name}")
