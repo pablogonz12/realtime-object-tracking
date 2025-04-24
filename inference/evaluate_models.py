@@ -46,9 +46,11 @@ RESULTS_DIR.mkdir(exist_ok=True, parents=True)
 
 # Configure models for evaluation
 MODELS_TO_EVALUATE = [
-    {"type": "faster-rcnn", "path": DEFAULT_MODEL_PATHS['faster-rcnn'], "config": None},
-    {"type": "rtdetr", "path": DEFAULT_MODEL_PATHS['rtdetr'], "config": None},
+    {"type": "mask-rcnn", "path": DEFAULT_MODEL_PATHS['mask-rcnn'], "config": None},
     {"type": "yolo-seg", "path": DEFAULT_MODEL_PATHS['yolo-seg'], "config": None}
+    # Removed RTMDet entry
+    # If you wanted to evaluate FastSAM (though it lacks classification for mAP):
+    # {"type": "fastsam-s", "path": DEFAULT_MODEL_PATHS['fastsam-s'], "config": None}
 ]
 
 # COCO val2017 has 5000 images total
@@ -214,7 +216,10 @@ class ModelEvaluator:
             try:
                 # Run inference with timing
                 start_time = time.time()
+                
+                # Standard prediction for all our models
                 detections, segmentations, annotated_image = model_manager.predict(image)
+                    
                 inference_time = time.time() - start_time
                 
                 # Record inference time
@@ -237,10 +242,15 @@ class ModelEvaluator:
                     cv2.imwrite(str(vis_dir / f"img_{image_id}_{model_type}.jpg"), annotated_image)
                 
                 # Format detections for COCO evaluation
-                for det in detections:
+                for det_idx, det in enumerate(detections):
                     # Get class ID (COCO dataset uses categories 1-90)
                     class_id = det.get("class_id")
-                    
+
+                    # --- DEBUGGING START ---
+                    # if model_type == "yolo-seg" and idx < 3 and det_idx < 5:
+                    #     pass # Or remove the block entirely
+                    # --- DEBUGGING END ---
+
                     # Skip if class_id is None or not recognized
                     if class_id is None:
                         continue
@@ -255,10 +265,15 @@ class ModelEvaluator:
                         # Add prediction to the list in COCO format
                         pred = {
                             'image_id': int(image_id),
-                            'category_id': int(class_id),
+                            'category_id': int(class_id), # Ensure category_id is integer
                             'bbox': coco_box,
                             'score': float(det.get("score", 0.0))
                         }
+                        
+                        # --- DEBUGGING START ---
+                        if model_type == "yolo-seg" and idx < 3 and det_idx < 5:
+                            print(f"DEBUG ({model_type}, img_id={image_id}, det_idx={det_idx}): COCO_pred={pred}")
+                        # --- DEBUGGING END ---
                         
                         coco_bbox_predictions.append(pred)
                 
@@ -267,11 +282,12 @@ class ModelEvaluator:
                     for i, mask in enumerate(segmentations):
                         if i < len(detections) and mask is not None:  # Make sure we have a detection to pair with
                             det = detections[i]
+                            class_id = det.get("class_id") # Get class_id again for segmentation
                             
                             # Skip if no class_id or if mask is invalid
-                            if det.get("class_id") is None or mask.shape[0] == 0:
+                            if class_id is None or mask.shape[0] == 0:
                                 continue
-                                
+                            
                             # Convert binary mask to RLE format that COCO expects
                             try:
                                 # Ensure mask is binary (0/1)
@@ -292,7 +308,7 @@ class ModelEvaluator:
                                 # Create COCO format segmentation prediction
                                 segm_pred = {
                                     'image_id': int(image_id),
-                                    'category_id': int(det.get("class_id")),
+                                    'category_id': int(class_id), # Ensure category_id is integer
                                     'segmentation': rle,
                                     'score': float(det.get("score", 0.0)),
                                     'area': area
@@ -328,6 +344,11 @@ class ModelEvaluator:
                 if coco_bbox_predictions:
                     print(f"Running COCO bbox evaluation for {model_type} with {len(coco_bbox_predictions)} predictions")
                     
+                    # --- DEBUGGING START ---
+                    if model_type == "yolo-seg" and len(coco_bbox_predictions) > 0:
+                        print(f"DEBUG ({model_type}): First few formatted bbox preds: {coco_bbox_predictions[:5]}")
+                    # --- DEBUGGING END ---
+
                     # Save predictions to a temporary file
                     with tempfile.NamedTemporaryFile('w', suffix='.json', delete=False) as f:
                         json.dump(coco_bbox_predictions, f)
@@ -367,6 +388,11 @@ class ModelEvaluator:
                 if model_type == "yolo-seg" and coco_segm_predictions:
                     print(f"Running COCO segmentation evaluation for {model_type} with {len(coco_segm_predictions)} predictions")
                     
+                    # --- DEBUGGING START ---
+                    if len(coco_segm_predictions) > 0:
+                        print(f"DEBUG ({model_type}): First few formatted segm preds: {coco_segm_predictions[:5]}")
+                    # --- DEBUGGING END ---
+
                     # Save predictions to a temporary file
                     with tempfile.NamedTemporaryFile('w', suffix='.json', delete=False) as f:
                         json.dump(coco_segm_predictions, f)
@@ -392,7 +418,7 @@ class ModelEvaluator:
                         "Segm_AP_medium": float(coco_segm_eval.stats[4]),         # AP for medium objects
                         "Segm_AP_large": float(coco_segm_eval.stats[5]),          # AP for large objects
                         "Segm_AR_max=1": float(coco_segm_eval.stats[6]),          # AR given 1 detection per image
-                        "Segm_AR_max=10": float(coco_segm_eval.stats[7]),         # AR given 10 detections per image
+                        "Segm_AR_max=10": float(coco_segm_eval.stats[7]),         # Segm AR given 10 detections per image
                         "Segm_AR_max=100": float(coco_segm_eval.stats[8]),        # AR given 100 detections per image
                         "Segm_AR_small": float(coco_segm_eval.stats[9]),          # AR for small objects
                         "Segm_AR_medium": float(coco_segm_eval.stats[10]),        # AR for medium objects
@@ -418,14 +444,14 @@ class ModelEvaluator:
         print(f"- Average detections per image: {metrics['avg_detections_per_image']:.2f}")
         
         # Print COCO metrics if available
-        if metrics["coco_metrics"] and "error" not in metrics["coco_metrics"]:
+        if "coco_metrics" in metrics and metrics["coco_metrics"] and "error" not in metrics["coco_metrics"]:
             print("- COCO Detection Metrics:")
             print(f"  • mAP (IoU=0.50:0.95): {metrics['coco_metrics']['AP_IoU=0.50:0.95']:.4f}")
             print(f"  • AP (IoU=0.50): {metrics['coco_metrics']['AP_IoU=0.50']:.4f}")
             print(f"  • AP (IoU=0.75): {metrics['coco_metrics']['AP_IoU=0.75']:.4f}")
         
         # Print segmentation metrics if available
-        if metrics.get("coco_segm_metrics") and "error" not in metrics.get("coco_segm_metrics", {}):
+        if "coco_segm_metrics" in metrics and metrics.get("coco_segm_metrics") and "error" not in metrics.get("coco_segm_metrics", {}):
             print("- COCO Segmentation Metrics:")
             print(f"  • Segmentation mAP (IoU=0.50:0.95): {metrics['coco_segm_metrics']['Segm_AP_IoU=0.50:0.95']:.4f}")
             print(f"  • Segmentation AP (IoU=0.50): {metrics['coco_segm_metrics']['Segm_AP_IoU=0.50']:.4f}")
@@ -656,8 +682,12 @@ def main():
                         help=f"Number of COCO val2017 images to use (max {COCO_VAL_TOTAL_IMAGES}, default: 50)")
     parser.add_argument("--no-vis", action="store_true", 
                         help="Skip saving visualizations (useful for evaluating many images)")
-    parser.add_argument("--models", type=str, nargs="+", choices=["faster-rcnn", "rtdetr", "yolo-seg"], 
+    parser.add_argument("--models", type=str, nargs="+", choices=["mask-rcnn", "yolo-seg", "rtmdet-ins"], 
                         help="Specific models to evaluate (default: all)")
+    parser.add_argument("--visualize", action="store_true",
+                        help="Generate comprehensive visualization dashboard after evaluation")
+    parser.add_argument("--report", action="store_true",
+                        help="Generate comprehensive HTML report after evaluation")
     args = parser.parse_args()
     
     # Validate args
@@ -682,6 +712,28 @@ def main():
     evaluator.run_evaluation(max_images, save_visualizations)
     
     print("Evaluation complete!")
+    
+    # Create visualizations if requested
+    if args.visualize or args.report:
+        try:
+            from inference.metrics_visualizer import MetricsVisualizer
+            visualizer = MetricsVisualizer()  # Will automatically use latest results
+            
+            if args.report:
+                report_path = visualizer.generate_comprehensive_report()
+                print(f"Comprehensive report generated at: {report_path}")
+            elif args.visualize:
+                dashboard_path = visualizer.create_metrics_dashboard()
+                pr_curve_path = visualizer.create_precision_recall_curve()
+                print(f"Performance dashboard generated at: {dashboard_path}")
+                print(f"Precision-recall curve generated at: {pr_curve_path}")
+        except ImportError as e:
+            print(f"Warning: Could not import metrics visualizer: {e}")
+            print("Skipping enhanced visualizations...")
+        except Exception as e:
+            print(f"Error generating visualizations: {e}")
+            import traceback
+            traceback.print_exc()
 
 if __name__ == "__main__":
     main()

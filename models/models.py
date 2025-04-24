@@ -34,36 +34,46 @@ COCO_CLASSES = [
 # Using Path for better path handling
 MODELS_DIR = Path("models/pts")
 MODELS_DIR.mkdir(parents=True, exist_ok=True) # Ensure directory exists
+CONFIGS_DIR = Path("models/configs") # Define config directory
+CONFIGS_DIR.mkdir(parents=True, exist_ok=True)
 
 DEFAULT_MODEL_PATHS = {
-    'faster-rcnn': MODELS_DIR / 'fasterrcnn_resnet50_fpn.pt',
-    'rtdetr': MODELS_DIR / 'rtdetr-l.pt',
-    'yolo-seg': MODELS_DIR / 'yolov8n-seg.pt', # Added YOLO Segmentation model
+    # 'faster-rcnn': MODELS_DIR / 'fasterrcnn_resnet50_fpn.pt', # Keep if needed, but Mask R-CNN is preferred for segmentation
+    'yolo-seg': MODELS_DIR / 'yolov8n-seg.pt',
     'mask-rcnn': MODELS_DIR / 'maskrcnn_resnet50_fpn.pt',
-    'sam': MODELS_DIR / 'sam_vit_h.pt'
+    # 'rtmdet-ins': MODELS_DIR / 'rtmdet_x_8xb32-300e_coco.pth', # Removed RTMDet
+    # 'fastsam-s': MODELS_DIR / 'FastSAM-s.pt', # Removed FastSAM
+    # 'fastsam-x': MODELS_DIR / 'FastSAM-x.pt'  # Removed FastSAM
 }
 
 MODEL_URLS = {
-    "rtdetr-l.pt": "https://github.com/ultralytics/assets/releases/download/v0.0.0/rtdetr-l.pt",
-    "yolov8n-seg.pt": "https://github.com/ultralytics/assets/releases/download/v0.0.0/yolov8n-seg.pt", # Added YOLO-Seg URL
-    "sam_vit_h.pt": "https://dl.fbaipublicfiles.com/segment_anything/sam_vit_h_4b8939.pth"
+    "yolov8n-seg.pt": "https://github.com/ultralytics/assets/releases/download/v0.0.0/yolov8n-seg.pt",
+    # Mask R-CNN uses torchvision built-in
+    # "rtmdet_x_8xb32-300e_coco.pth": "https://download.openmmlab.com/mmdetection/v3.0/rtmdet/rtmdet_x_8xb32-300e_coco/rtmdet_x_8xb32-300e_coco_20220715_230555-cc79b9ae.pth", # Removed RTMDet URL
+    # "FastSAM-s.pt": "https://github.com/ultralytics/assets/releases/download/v0.0.0/FastSAM-s.pt", # Removed FastSAM URL
+    # "FastSAM-x.pt": "https://github.com/ultralytics/assets/releases/download/v0.0.0/FastSAM-x.pt"  # Removed FastSAM URL
 }
 
 # --- Helper Function for Downloading ---
 def _download_model_if_needed(model_path: Path):
     """Downloads the model file if it does not exist."""
     if model_path.exists():
-        print(f"Model found: {model_path}")
-        return True
+        # Check if file size is greater than zero for placeholder files
+        if model_path.stat().st_size > 0:
+             print(f"Model found: {model_path}")
+             return True
+        else:
+             print(f"Placeholder found, proceeding with download check: {model_path}")
 
     model_name = model_path.name
     # Skip download for Mask R-CNN as we'll use torchvision's pretrained model
     if model_name == 'maskrcnn_resnet50_fpn.pt':
         print(f"Note: {model_name} will be loaded from torchvision, not downloaded.")
-        # Create an empty file as a placeholder
-        open(model_path, 'w').close()
-        return True
-        
+        # Create an empty file as a placeholder if it doesn't exist
+        if not model_path.exists():
+            model_path.touch()
+        return True # Indicate that it's handled
+
     if model_name not in MODEL_URLS:
         print(f"Error: No download URL defined for model: {model_name}")
         return False
@@ -72,10 +82,11 @@ def _download_model_if_needed(model_path: Path):
     print(f"Downloading {model_name} from {url} to {model_path}...")
 
     try:
-        response = requests.get(url, stream=True, timeout=60) # Added timeout
+        # Standard download method
+        response = requests.get(url, stream=True, timeout=120) # Increased timeout
         response.raise_for_status()
         total_size = int(response.headers.get('content-length', 0))
-        block_size = 1024 # 1 Kibibyte
+        block_size = 8192 # Increased block size
 
         with open(model_path, "wb") as f:
             downloaded_size = 0
@@ -85,11 +96,11 @@ def _download_model_if_needed(model_path: Path):
                     downloaded_size += len(chunk)
                     # Basic progress indication
                     progress = int(50 * downloaded_size / total_size) if total_size else 0
-                    print(f"\rDownloading: [{'=' * progress}{' ' * (50 - progress)}] {downloaded_size / (1024*1024):.2f} MB / {total_size / (1024*1024):.2f} MB", end='')
-        print(f"\nModel {model_name} downloaded successfully.")
+                    print(f"\\rDownloading: [{'=' * progress}{' ' * (50 - progress)}] {downloaded_size / (1024*1024):.2f} MB / {total_size / (1024*1024):.2f} MB", end='')
+        print(f"\\nModel {model_name} downloaded successfully.")
         return True
     except requests.exceptions.RequestException as e:
-        print(f"\nError downloading model {model_name}: {e}")
+        print(f"\\nError downloading model {model_name}: {e}")
         # Clean up potentially incomplete file
         if model_path.exists():
             try:
@@ -99,7 +110,14 @@ def _download_model_if_needed(model_path: Path):
                 print(f"Error removing incomplete file {model_path}: {rm_err}")
         return False
     except Exception as e:
-        print(f"\nAn unexpected error occurred during download: {e}")
+        print(f"\\nAn unexpected error occurred during download: {e}")
+        # Clean up potentially incomplete file if it exists
+        if model_path.exists():
+             try:
+                 os.remove(model_path)
+                 print(f"Removed potentially corrupt file: {model_path}")
+             except OSError as rm_err:
+                 print(f"Error removing file {model_path}: {rm_err}")
         return False
 
 
@@ -198,12 +216,14 @@ class YOLOWrapper:
                 for i in range(len(boxes)):
                     box = boxes[i]
                     x1, y1, x2, y2 = map(int, box.xyxy[0])
-                    class_id = int(box.cls[0])
+                    # CRITICAL FIX: Convert YOLO's 0-indexed class IDs to COCO's 1-indexed class IDs
+                    yolo_class_id = int(box.cls[0])
+                    class_id = yolo_class_id + 1  # Add 1 to convert from 0-indexed to 1-indexed
                     score = float(box.conf[0])
-                    class_name = names.get(class_id, f"ID:{class_id}") # Get name or use ID
+                    class_name = names.get(yolo_class_id, f"ID:{yolo_class_id}") # Get name or use ID
                     detections.append({
                         "box": [x1, y1, x2, y2],
-                        "class_id": class_id,
+                        "class_id": class_id,  # Use the adjusted class_id
                         "class_name": class_name,
                         "score": score
                     })
@@ -393,8 +413,7 @@ class MaskRCNNWrapper:
             total_time = time.time() - start_time
             
             # Display timing information on frame
-            fps_text = f"FPS: {1/total_time:.1f}" 
-            cv2.putText(annotated_frame, fps_text, (10, 30),
+            cv2.putText(annotated_frame, f"FPS: {1/total_time:.1f}", (10, 30),
                        cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
             
             # Add detailed timing report to console
@@ -414,203 +433,6 @@ class MaskRCNNWrapper:
             return [], [], annotated_frame
 
 
-# --- SAM (Segment Anything Model) Wrapper ---
-class SAMWrapper:
-    """Wrapper for SAM (Segment Anything Model) inference."""
-    
-    def __init__(self, model_path=DEFAULT_MODEL_PATHS['sam'], config_path=None):
-        """
-        Initialize the SAM model wrapper.
-        
-        Args:
-            model_path (str or Path): Path to the SAM model weights file.
-            config_path (str, optional): Path to the configuration file (not used for SAM).
-        """
-        print("Initializing SAMWrapper")
-        self.model_path = Path(model_path)
-        
-        # Download model if it doesn't exist
-        if self.model_path == DEFAULT_MODEL_PATHS['sam']:
-            if not _download_model_if_needed(self.model_path):
-                print(f"Error: SAM model file {self.model_path} could not be found or downloaded.")
-                self.model = None
-                return
-        elif not self.model_path.exists():
-            print(f"Error: Custom SAM model file not found: {self.model_path}")
-            self.model = None
-            return
-
-        # Determine device (cuda or cpu)
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        print(f"Using device: {self.device}")
-        
-        try:
-            # Import SAM-specific modules here to avoid dependency if not used
-            from segment_anything import sam_model_registry, SamPredictor
-            
-            print("Loading SAM model...")
-            # Determine model type from path (default to vit_h)
-            if "vit_h" in str(self.model_path):
-                model_type = "vit_h"
-            elif "vit_l" in str(self.model_path):
-                model_type = "vit_l"
-            elif "vit_b" in str(self.model_path):
-                model_type = "vit_b"
-            else:
-                print(f"Model type not detected from path, defaulting to vit_h")
-                model_type = "vit_h"
-                
-            # Build the model
-            sam = sam_model_registry[model_type](checkpoint=str(self.model_path))
-            sam.to(device=self.device)
-            
-            # Create the predictor
-            self.model = SamPredictor(sam)
-            
-            print(f"SAM model ({model_type}) loaded successfully.")
-            
-        except ImportError:
-            print("Error: 'segment_anything' library not found. Please install it using:")
-            print("pip install git+https://github.com/facebookresearch/segment-anything.git")
-            self.model = None
-        except Exception as e:
-            print(f"Error loading SAM model: {e}")
-            import traceback
-            traceback.print_exc()
-            self.model = None
-    
-    def predict(self, frame, input_points=None, input_labels=None):
-        """
-        Performs segmentation on a single frame using the provided prompt points.
-        
-        Args:
-            frame (np.ndarray): Input video frame (BGR format).
-            input_points (np.ndarray): Array of prompt points of shape (N, 2).
-            input_labels (np.ndarray): Labels for each point (1 for foreground, 0 for background).
-                
-        Returns:
-            tuple: A tuple containing:
-                - detections (list): Empty list (SAM doesn't provide class info).
-                - segmentations (list): List of segmentation masks.
-                - annotated_frame (np.ndarray): Frame with visualizations drawn.
-        """
-        if self.model is None:
-            print("Warning: SAM model not loaded. Returning empty results.")
-            annotated_frame = frame.copy()
-            cv2.putText(annotated_frame, "SAM Model Not Loaded", (50, 50),
-                        cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
-            return [], [], annotated_frame
-        
-        # Check if we have input points for prompting
-        if input_points is None or len(input_points) == 0:
-            print("Warning: SAM requires input points for prompting. No points provided.")
-            annotated_frame = frame.copy()
-            cv2.putText(annotated_frame, "SAM: No input points provided", (50, 50),
-                        cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
-            return [], [], annotated_frame
-            
-        try:
-            # Start timing
-            start_time = time.time()
-            
-            # Convert BGR to RGB
-            rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            
-            # Set the image for feature extraction
-            print("Setting image for feature extraction...")
-            self.model.set_image(rgb_frame)
-            
-            feature_time = time.time() - start_time
-            inference_start = time.time()
-            
-            # If no labels are provided, default to all foreground (1)
-            if input_labels is None:
-                input_labels = np.ones(len(input_points), dtype=np.int32)
-
-            # Convert points and labels to numpy arrays if they're not already
-            if not isinstance(input_points, np.ndarray):
-                input_points = np.array(input_points)
-            if not isinstance(input_labels, np.ndarray):
-                input_labels = np.array(input_labels)
-                
-            # Ensure input_points is 2D
-            if input_points.ndim == 1:
-                input_points = input_points.reshape(1, 2)
-                
-            # Get masks from SAM
-            print(f"Generating masks with {len(input_points)} points...")
-            masks, scores, _ = self.model.predict(
-                point_coords=input_points,
-                point_labels=input_labels,
-                multimask_output=True  # Return multiple masks per prompt
-            )
-            
-            inference_time = time.time() - inference_start
-            postprocess_start = time.time()
-            
-            # Create a copy of the frame for annotation
-            annotated_frame = frame.copy()
-            
-            # Process and visualize all masks
-            segmentations = []
-            
-            # If we have masks, process them
-            if masks is not None and len(masks) > 0:
-                # Use different colors for different masks
-                colors = [(np.random.randint(0, 256), np.random.randint(0, 256), np.random.randint(0, 256)) 
-                          for _ in range(len(masks))]
-                
-                for i, (mask, score) in enumerate(zip(masks, scores)):
-                    # Convert mask to binary (0 or 1)
-                    binary_mask = mask.astype(np.uint8)
-                    segmentations.append(binary_mask)
-                    
-                    # Create colored mask for visualization
-                    color = colors[i % len(colors)]
-                    colored_mask = np.zeros_like(frame)
-                    colored_mask[binary_mask > 0] = color
-                    
-                    # Overlay the mask on the original frame
-                    cv2.addWeighted(annotated_frame, 1.0, colored_mask, 0.5, 0, annotated_frame)
-                    
-                    # Add text indicating score
-                    cv2.putText(annotated_frame, f"Segment {i+1}: {score:.2f}", (10, 50 + 30*i),
-                               cv2.FONT_HERSHEY_SIMPLEX, 0.7, color, 2)
-            
-            # Draw the prompt points
-            for i, (point, label) in enumerate(zip(input_points, input_labels)):
-                x, y = point.astype(int)
-                # Red for background points (label=0), green for foreground points (label=1)
-                color = (0, 0, 255) if label == 0 else (0, 255, 0)
-                cv2.circle(annotated_frame, (x, y), 5, color, -1)
-            
-            postprocess_time = time.time() - postprocess_start
-            total_time = time.time() - start_time
-            
-            # Add timing information
-            cv2.putText(annotated_frame, f"FPS: {1/total_time:.1f}", (10, 30),
-                       cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
-            
-            # Add detailed timing report to console
-            print(f"SAM timing: Total={total_time:.3f}s (FPS: {1/total_time:.1f}) | " 
-                  f"Feature extraction={feature_time:.3f}s | Inference={inference_time:.3f}s | "
-                  f"Postprocess={postprocess_time:.3f}s | Segments={len(segmentations)}")
-            
-            # Return empty detections since SAM doesn't classify objects
-            detections = []
-            
-            return detections, segmentations, annotated_frame
-            
-        except Exception as e:
-            print(f"Error during SAM prediction: {e}")
-            import traceback
-            traceback.print_exc()
-            annotated_frame = frame.copy()
-            cv2.putText(annotated_frame, f"SAM Error: {str(e)[:50]}", (50, 50),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
-            return [], [], annotated_frame
-
-
 # --- Model Manager ---
 class ModelManager:
     """Manager class for handling different model types"""
@@ -620,19 +442,20 @@ class ModelManager:
         Initializes the appropriate model wrapper based on the model type.
 
         Args:
-            model_type (str): Type of the model ('faster-rcnn', 'rtdetr', 'yolo-seg').
+            model_type (str): Type of the model ('mask-rcnn', 'yolo-seg', 'rtmdet-ins').
             model_path (str or Path, optional): Path to the model weights file.
                                                 If None, uses default path for the type.
-            config_path (str, optional): Path to the configuration file (currently unused).
+            config_path (str, optional): Path to the configuration file (used by RTMDet-Ins).
         """
         self.model_type = model_type.lower()
-        self.config_path = config_path # Store config path even if unused by current wrappers
+        self.config_path = config_path # Store config path
 
         # Determine model path: Use provided path or default for the type
         self.model_path = Path(model_path) if model_path else DEFAULT_MODEL_PATHS.get(self.model_type)
         if not self.model_path:
              raise ValueError(f"Model path not specified and no default path found for type: {self.model_type}")
 
+        # Device selection logic remains the same
         self.device = self._get_device()
         print(f"Using device: {self.device}")
         self.model_wrapper = self._initialize_model()
@@ -642,73 +465,71 @@ class ModelManager:
              # Optionally raise an error here if initialization must succeed
              # raise RuntimeError("Model wrapper initialization failed.")
 
-
     def _get_device(self):
         """Determine the device to use with enhanced detection for problematic CUDA setups."""
         # Check if we have an environment variable to force a specific device
         force_device = os.environ.get("CV_FORCE_DEVICE", "").lower()
-        
+
         # First attempt: Check standard PyTorch CUDA availability
         cuda_available = torch.cuda.is_available()
-        
+
         # Second attempt: Check if NVIDIA drivers are installed even if PyTorch doesn't see them
         nvidia_driver_available = False
         try:
             import subprocess
-            nvidia_smi = subprocess.run(['nvidia-smi'], capture_output=True, text=True)
+            nvidia_smi = subprocess.run(['nvidia-smi'], capture_output=True, text=True, check=False) # Use check=False
             if nvidia_smi.returncode == 0:
                 nvidia_driver_available = True
                 print("NVIDIA drivers detected via nvidia-smi")
                 # Parse nvidia-smi output to get GPU name
-                for line in nvidia_smi.stdout.split('\n'):
-                    if "NVIDIA" in line and "RTX" in line:
+                for line in nvidia_smi.stdout.split('\\n'):
+                    if "NVIDIA" in line and ("RTX" in line or "GeForce" in line or "Tesla" in line): # Broader check
                         gpu_name = line.strip()
                         print(f"Found GPU via nvidia-smi: {gpu_name}")
-        except:
-            pass
-            
+                        break # Found one, no need to check further
+        except FileNotFoundError:
+             print("nvidia-smi command not found. Cannot check for NVIDIA drivers this way.")
+        except Exception as e:
+            print(f"Error running nvidia-smi: {e}")
+
         # Determine if we should force CUDA based on environment and hardware detection
-        force_cuda = (force_device == "cuda" or 
-                     (force_device == "auto" and (cuda_available or nvidia_driver_available)))
-                     
-        # Force CUDA if user explicitly asked for it or if we detected NVIDIA GPU but PyTorch didn't
-        if force_cuda:
-            if cuda_available:
-                device_count = torch.cuda.device_count()
-                current_device = torch.cuda.current_device() 
-                device_name = torch.cuda.get_device_name(current_device)
-                print(f"Using CUDA with GPU: {device_name}")
-                return 'cuda'
-            elif nvidia_driver_available and force_device == "cuda":
-                # If user forced CUDA and we see NVIDIA drivers but PyTorch doesn't recognize them,
-                # still attempt to use CUDA and warn the user
-                print("WARNING: NVIDIA GPU detected but PyTorch can't access it through CUDA.")
-                print("This may be due to PyTorch being installed without CUDA support.")
-                print("Attempting to use CUDA anyway, but this may cause errors.")
-                print("Try reinstalling PyTorch with CUDA support using:")
-                print("pip install torch torchvision --extra-index-url https://download.pytorch.org/whl/cu118")
-                
-                # We'll still return 'cuda' to make an attempt, even if it might fail
-                # This will allow error messages to be more informative
-                return 'cuda'
-        
-        # Fallback to CPU
-        print("Using CPU for model inference (no CUDA GPU detected or CPU forced)")
-        return 'cpu'
+        force_cuda = (force_device == "cuda" or
+                     (force_device != "cpu" and (cuda_available or nvidia_driver_available))) # Default to GPU if available unless CPU forced
+
+        # Use CUDA if forced or available and not overridden by CPU force
+        if force_cuda and cuda_available:
+            device_count = torch.cuda.device_count()
+            current_device = torch.cuda.current_device()
+            device_name = torch.cuda.get_device_name(current_device)
+            print(f"Using CUDA with GPU: {device_name} (Available: {device_count})")
+            return 'cuda'
+        elif force_cuda and nvidia_driver_available and not cuda_available:
+            # If user wants CUDA (or default auto) and we see NVIDIA drivers but PyTorch doesn't recognize them,
+            # warn the user but still try CPU as CUDA won't work.
+            print("WARNING: NVIDIA GPU detected but PyTorch cannot access it via CUDA.")
+            print("This is likely due to PyTorch being installed without CUDA support or a driver/CUDA toolkit mismatch.")
+            print("Please check your PyTorch installation and CUDA setup.")
+            print("Falling back to CPU.")
+            return 'cpu'
+        else:
+            # Fallback to CPU
+            if force_device == "cpu":
+                 print("Forcing CPU usage based on environment variable.")
+            else:
+                 print("Using CPU for model inference (No CUDA GPU detected/available or CPU forced).")
+            return 'cpu'
 
     def _initialize_model(self):
         """Initialize the appropriate model based on type"""
         print(f"Initializing model manager for type: {self.model_type}")
         try:
             if self.model_type == 'mask-rcnn':
-                # Mask R-CNN wrapper from torchvision
                 return MaskRCNNWrapper(self.model_path)
             elif self.model_type == 'yolo-seg':
-                # YOLO segmentation model
                 return YOLOWrapper(self.model_path)
-            elif self.model_type == 'sam':
-                # Segment Anything Model (SAM)
-                return SAMWrapper(self.model_path, self.config_path)
+            # elif self.model_type == 'rtmdet-ins': # Removed RTMDet
+            #     # RTMDet-Ins model using MMDetection
+            #     return RTMDetWrapper(self.model_path, self.config_path)
             else:
                 print(f"Error: Unsupported model type: {self.model_type}")
                 return None # Return None for unsupported types
@@ -718,43 +539,42 @@ class ModelManager:
              traceback.print_exc()
              return None
 
-
     def predict(self, frame, input_points=None, input_labels=None):
         """
         Performs prediction using the selected model.
 
         Args:
             frame (np.ndarray): Input video frame.
-            input_points (Optional[np.ndarray]): Point prompts for SAM (if applicable).
-            input_labels (Optional[np.ndarray]): Labels for input points for SAM (if applicable).
+            input_points (Optional[np.ndarray]): Not used by current models.
+            input_labels (Optional[np.ndarray]): Not used by current models.
 
         Returns:
-            tuple: Prediction results. Format depends on the model type:
-                   - YOLO-Seg/Mask R-CNN: (detections, segmentations, annotated_frame)
-                   - SAM: (detections, segmentations, annotated_frame) with detections being empty
+            tuple: Prediction results: (detections, segmentations, annotated_frame)
                    Returns ([], [], frame) if the model wrapper is not valid or prediction fails.
         """
         if self.model_wrapper is None or not hasattr(self.model_wrapper, 'predict'):
             print(f"Error: Model wrapper for {self.model_type} is not initialized or lacks predict method.")
             annotated_frame = frame.copy()
-            cv2.putText(annotated_frame, f"{self.model_type.upper()} Model Error", (50, 140),
+            # Add error text to frame
+            cv2.putText(annotated_frame, f"{self.model_type.upper()} Model Error", (10, 60), # Adjusted position
                         cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
-            return [], [], annotated_frame # Return empty results and original frame
+            return [], [], annotated_frame # Return empty results and annotated frame
 
         try:
-            # Handle different model types
-            if self.model_type == 'sam':
-                # SAM needs point prompts to generate masks
-                return self.model_wrapper.predict(frame, input_points, input_labels)
-            else:
-                # Other models (YOLO-Seg, Mask R-CNN) don't use input points
-                return self.model_wrapper.predict(frame)
+            # All current models (Mask R-CNN, YOLO-Seg) use the same predict signature
+            return self.model_wrapper.predict(frame)
         except Exception as e:
             print(f"Error during prediction with {self.model_type}: {e}")
             import traceback
             traceback.print_exc()
             annotated_frame = frame.copy()
-            cv2.putText(annotated_frame, f"{self.model_type.upper()} Predict Error", (50, 140),
+            # Add error text to frame
+            cv2.putText(annotated_frame, f"{self.model_type.upper()} Predict Error", (10, 60), # Adjusted position
                         cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
             # Return empty lists and the annotated error frame
             return [], [], annotated_frame
+
+# Define COLORS for visualization if not already defined globally
+# Generate random colors for visualization
+np.random.seed(42) # for reproducibility
+COLORS = [[np.random.randint(0, 255) for _ in range(3)] for _ in range(len(COCO_CLASSES))] # Use COCO classes length for consistency

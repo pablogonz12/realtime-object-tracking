@@ -3,16 +3,22 @@ torch
 torchvision
 torchaudio
 
-# YOLO / Ultralytics
+# YOLO / Ultralytics / FastSAM
 ultralytics
 
 # OpenCV for image/video processing
 opencv-python
 
-# PyO3 for Rust integration
+# PyO3 for Rust integration (If still needed, otherwise remove)
 pyo3
 
-# Add other dependencies as needed for RT-DETR, SAM2, etc.
+# MMDetection dependencies (REMOVED)
+# Note: Specific versions might be required depending on your PyTorch/CUDA setup.
+# Refer to MMDetection installation guide if auto-install fails.
+# mmcv # Removed
+# mmdet # Removed
+
+# Other common dependencies
 numpy
 Pillow
-segment-anything
+requests # Added for model downloading
