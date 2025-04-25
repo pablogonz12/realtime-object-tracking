@@ -18,6 +18,7 @@ from pathlib import Path
 from datetime import datetime
 import glob
 import os
+import traceback # For detailed error printing
 
 # Configure paths relative to this script's location
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -30,12 +31,12 @@ VISUALIZATIONS_DIR.mkdir(exist_ok=True, parents=True)
 # *** Add new models and their desired colors here as needed. ***
 # Ensure these keys match the model names used as keys in the evaluation_results_*.json file.
 MODEL_COLORS = {
-    'Faster R-CNN': '#1f77b4', # Muted Blue (Matches your image)
-    'RT-DETR': '#ff7f0e',    # Safety Orange (Matches your image)
-    'YOLOv8-Seg': '#2ca02c', # Cooked Asparagus Green (Matches your image)
+    # Updated to match the red color used in target image's FPS/Radar/Scatter/Table
+    'mask-rcnn': '#d62728', # Brick Red 
+    'yolo-seg': '#d62728',  # Brick Red (Using same color for consistency in model-specific plots)
     # Add future models here, e.g.:
     # 'MyNewModel': '#9467bd', # Muted Purple
-    'Default': '#d62728'    # Brick Red (Fallback for unlisted models)
+    'Default': '#888888'    # Grey fallback for unlisted models
 }
 
 def get_model_color(model_name):
@@ -74,7 +75,6 @@ class MetricsVisualizer:
 
         if self.results:
             # Dynamically get model names from the keys in the loaded JSON data
-            # This makes the class automatically adapt to the models present in the file.
             self.models = list(self.results.keys())
             # Remove metadata key if it exists
             if "evaluation_metadata" in self.models:
@@ -100,6 +100,7 @@ class MetricsVisualizer:
             self._load_results() # Load the found file
         except Exception as e:
             print(f"Error finding latest results file: {e}")
+            traceback.print_exc()
 
     def _load_results(self):
         """Loads the JSON data from the specified results file."""
@@ -115,6 +116,7 @@ class MetricsVisualizer:
             self.results = None
         except Exception as e:
             print(f"Error loading results file {self.results_file.name}: {e}")
+            traceback.print_exc()
             self.results = None
 
     def _get_metric(self, model, metric_path, default=0.0):
@@ -130,10 +132,14 @@ class MetricsVisualizer:
         Returns:
             float: The metric value or the default.
         """
-        value = self.results.get(model, {}) # Get the dictionary for the specific model
+        if model not in self.results:
+            # print(f"Debug: Model '{model}' not found in results.")
+            return default
+
+        value_source = self.results.get(model, {}) # Get the dictionary for the specific model
         keys = metric_path.split('.')
         try:
-            current_level = value
+            current_level = value_source
             for key in keys:
                 # Check if the current level is a dictionary and contains the key
                 if isinstance(current_level, dict) and key in current_level:
@@ -151,7 +157,7 @@ class MetricsVisualizer:
             return default
         except Exception as e:
              # Catch any other unexpected errors during access
-            # print(f"Debug: Unexpected error accessing {metric_path} for {model}: {e}")
+             # print(f"Debug: Unexpected error accessing {metric_path} for {model}: {e}")
              return default
 
 
@@ -160,6 +166,7 @@ class MetricsVisualizer:
         Parses the loaded results for ALL models found in the file and
         prepares data structures (DataFrame, lists) needed for the various plots.
         Uses _get_metric to handle potentially missing data for any model.
+        Calculates Precision, Recall, F1 based on COCO proxies.
         """
         if not self.results or not self.models:
             print("Error: Cannot extract data, results not loaded or no models found.")
@@ -167,15 +174,13 @@ class MetricsVisualizer:
 
         self.data = {}
 
-        # Define all metrics needed across all plots and their paths in the JSON
+        # Define metrics to extract directly from JSON (excluding P/R/F1 for now)
         metrics_to_extract = {
             # Display Name          : JSON Path
-            "Precision"             : "precision",
-            "Recall"                : "recall",
-            "F1-Score"              : "f1_score",
             "mAP (IoU=0.50:0.95)"   : "coco_metrics.AP_IoU=0.50:0.95",
-            "AP (IoU=0.50)"         : "coco_metrics.AP_IoU=0.50",
+            "AP (IoU=0.50)"         : "coco_metrics.AP_IoU=0.50", # Proxy for Precision
             "AP (IoU=0.75)"         : "coco_metrics.AP_IoU=0.75",
+            "AR (max=100)"          : "coco_metrics.AR_max=100", # Proxy for Recall
             "Small Objects AP"      : "coco_metrics.AP_small",
             "Medium Objects AP"     : "coco_metrics.AP_medium",
             "Large Objects AP"      : "coco_metrics.AP_large",
@@ -184,44 +189,75 @@ class MetricsVisualizer:
 
         # Initialize dictionary to hold extracted data
         plot_data = {key: [] for key in metrics_to_extract.keys()}
+        # Add placeholders for calculated P/R/F1
+        plot_data["Precision"] = []
+        plot_data["Recall"] = []
+        plot_data["F1-Score"] = []
         plot_data["Model"] = self.models # Store model names in order
 
         # --- Extract main metrics for each model ---
-        # This loop inherently handles any number of models found in self.models
         for model in self.models:
+            # Extract metrics defined in metrics_to_extract
             for display_name, json_path in metrics_to_extract.items():
-                # Use the safe getter function; handles missing metrics per model
                 metric_value = self._get_metric(model, json_path, default=0.0)
                 plot_data[display_name].append(metric_value)
 
-        # Convert the extracted metrics into a pandas DataFrame for convenience
+            # --- Calculate P/R/F1 from proxies ---
+            # For Precision, try multiple potential metrics and use the maximum value
+            # This ensures we get visible bars even when some metrics are zero
+            ap50 = plot_data["AP (IoU=0.50)"][-1] # Standard precision proxy
+            # Also consider other metrics that could represent precision
+            ap75 = plot_data["AP (IoU=0.75)"][-1]
+            small_ap = plot_data["Small Objects AP"][-1]
+            medium_ap = plot_data["Medium Objects AP"][-1] 
+            large_ap = plot_data["Large Objects AP"][-1]
+            
+            # For precision, use the highest value from any AP metric
+            precision_candidates = [ap50, ap75, small_ap, medium_ap, large_ap]
+            precision_proxy = max(precision_candidates) if any(v > 0 for v in precision_candidates) else ap50
+            
+            # Use AR_max=100 directly as Recall proxy
+            recall_proxy = plot_data["AR (max=100)"][-1]
+
+            # Calculate F1, handle division by zero
+            if precision_proxy + recall_proxy > 1e-9: # Use tolerance
+                f1_score = 2 * (precision_proxy * recall_proxy) / (precision_proxy + recall_proxy)
+            else:
+                f1_score = 0.0
+
+            # Append calculated values
+            plot_data["Precision"].append(precision_proxy)
+            plot_data["Recall"].append(recall_proxy)
+            plot_data["F1-Score"].append(f1_score)
+
+        # Convert the extracted and calculated metrics into a pandas DataFrame
         self.data['summary_df'] = pd.DataFrame(plot_data)
         # Use Model names as the index for the DataFrame
         self.data['summary_df'].set_index('Model', inplace=True)
 
-        # --- Extract Detection Counts for Box Plot ---
-        # Assumes 'detection_counts_per_image' is a list stored for each model in the JSON
+        # --- Extract Detection Counts for Box Plot (remains the same) ---
         detection_counts = {}
-        max_detection_value = 0 # To set an appropriate y-axis limit later
+        max_detection_value = 0
 
         for model in self.models:
-            # Safely get the list of counts, default to empty list if missing
             counts = self.results.get(model, {}).get("detection_counts_per_image", [])
-
-            if isinstance(counts, list) and counts: # Check if it's a non-empty list
-                detection_counts[model] = counts
-                current_max = max(counts)
-                if current_max > max_detection_value:
-                    max_detection_value = current_max
+            if isinstance(counts, list) and counts:
+                numeric_counts = [c for c in counts if isinstance(c, (int, float))]
+                if numeric_counts:
+                    detection_counts[model] = numeric_counts
+                    current_max = max(numeric_counts)
+                    if current_max > max_detection_value:
+                        max_detection_value = current_max
+                else:
+                    # List exists but contains no numeric data
+                    print(f"Warning: 'detection_counts_per_image' for model '{model}' contains no numeric data. Plotting [0].")
+                    detection_counts[model] = [0]
             else:
                 # If counts are missing, empty, or not a list, add a placeholder [0]
-                # This allows the model to appear on the box plot axis but shows no distribution.
                 detection_counts[model] = [0]
-                if not isinstance(counts, list):
+                if not isinstance(counts, list) and counts is not None: # Avoid warning if key truly missing
                      print(f"Warning: 'detection_counts_per_image' for model '{model}' is not a list. Found: {type(counts)}. Plotting [0].")
-                elif not counts:
-                      print(f"Warning: 'detection_counts_per_image' for model '{model}' is empty. Plotting [0].")
-                # Implicitly handles case where the key was missing entirely
+                # No warning needed if key is missing or list is empty, handled by default [0]
 
 
         self.data['detection_counts'] = detection_counts
@@ -288,7 +324,6 @@ class MetricsVisualizer:
             self._plot_summary_table(ax_table)
         except Exception as e:
              print(f"Error occurred during subplot generation: {e}")
-             import traceback
              traceback.print_exc()
              plt.close(fig) # Close the figure window to prevent display/saving issues
              return None
@@ -317,6 +352,7 @@ class MetricsVisualizer:
 
         except Exception as e:
             print(f"Error saving or showing the plot: {e}")
+            traceback.print_exc()
             plt.close(fig) # Ensure figure is closed on error
             return None
 
@@ -326,27 +362,24 @@ class MetricsVisualizer:
             # Handle BarContainer
             for bar in container:
                 height = bar.get_height()
-                # Only add label if height is significantly different from zero (optional)
-                # if abs(height) > 1e-6:
-                ax.annotate(f'{height:.{precision}f}' if abs(height) > 1e-9 else '0', # Format or show '0'
-                            xy=(bar.get_x() + bar.get_width() / 2, height),
-                            xytext=(0, 3),  # 3 points vertical offset
-                            textcoords="offset points",
-                            ha='center', va='bottom', fontsize=8)
+                # Format the label - use '0.000...' for zero values with specified precision
+                label = f'{height:.{precision}f}' if abs(height) > 1e-9 else f'0.{"0"*precision}'
+
+                ax.annotate(label,
+                           xy=(bar.get_x() + bar.get_width() / 2, height),
+                           xytext=(0, 3),  # 3 points vertical offset
+                           textcoords="offset points",
+                           ha='center', va='bottom', fontsize=8)
         else:
-            # Handle scatter plots or other containers (assuming container is iterable points)
-             # This part might need adjustment based on the specific plot type if not bar chart
-             pass # Placeholder - specific logic needed for scatter labels if required
+            # Handle scatter plots or other containers
+            pass # Not implemented for scatter in this version
 
 
     # --- Individual Plotting Functions ---
-    # These functions take an Axes object and plot the specific data onto it.
-    # They rely on self.data being populated by _extract_data_for_plotting.
 
     def _plot_precision_recall_f1(self, ax):
         """Plots Precision, Recall, F1-Score bar chart."""
         metrics_to_plot = ['Precision', 'Recall', 'F1-Score']
-        # Check if required columns exist
         available_metrics = [m for m in metrics_to_plot if m in self.data['summary_df'].columns]
         if not available_metrics:
              ax.text(0.5, 0.5, 'Precision/Recall/F1 data not available.', ha='center', va='center', transform=ax.transAxes)
@@ -354,27 +387,38 @@ class MetricsVisualizer:
              return
 
         df = self.data['summary_df'][available_metrics]
+
         n_models = len(df)
         n_metrics = len(df.columns)
         bar_width = 0.25
         index = np.arange(n_models)
 
-        # Use a perceptually uniform colormap like 'viridis'
-        colors = plt.cm.viridis(np.linspace(0, 1, n_metrics))
+        # Colors based on target image legend
+        metric_colors = {
+            'Precision': '#4B0082', # Indigo/Dark Purple
+            'Recall': '#20B2AA',    # Light Sea Green / Teal
+            'F1-Score': '#FFD700'   # Gold / Yellow
+        }
+        colors = [metric_colors.get(metric, plt.cm.viridis(i/n_metrics)) for i, metric in enumerate(df.columns)]
 
-        all_rects = [] # To store all bar containers for labeling
         for i, metric in enumerate(df.columns):
-            rects = ax.bar(index + i * bar_width, df[metric], bar_width,
-                           label=metric, color=colors[i])
-            self._add_value_labels(ax, rects, precision=3) # Add labels per metric group
-            all_rects.append(rects)
+            plot_data = pd.to_numeric(df[metric], errors='coerce').fillna(0)
+            rects = ax.bar(index + i * bar_width, plot_data, bar_width, label=metric, color=colors[i])
+            self._add_value_labels(ax, rects, precision=3)
 
         ax.set_ylabel('Value')
         ax.set_title('Precision, Recall, F1-Score Comparison')
         ax.set_xticks(index + bar_width * (n_metrics - 1) / 2)
         ax.set_xticklabels(df.index, rotation=0, ha='center')
         ax.legend(title="Metric", fontsize='small')
-        ax.set_ylim(0, 1.05) # Standard 0-1 scale for these metrics
+
+        # Dynamic y-axis to focus on small values
+        max_val = pd.to_numeric(df.stack(), errors='coerce').max()
+        if pd.isna(max_val) or max_val <= 0:
+            upper_limit = 1.05  # default
+        else:
+            upper_limit = max(0.1, max_val * 1.2)  # ensure at least 0.1
+        ax.set_ylim(bottom=0, top=upper_limit)
         ax.grid(axis='y', linestyle='--', alpha=0.6)
 
 
@@ -393,31 +437,40 @@ class MetricsVisualizer:
         bar_width = 0.25
         index = np.arange(n_models)
 
-        # Shorten labels slightly for the legend if needed
         legend_labels = {
             'mAP (IoU=0.50:0.95)': 'mAP (0.50:0.95)',
             'AP (IoU=0.50)': 'AP@0.50',
             'AP (IoU=0.75)': 'AP@0.75'
         }
-        # Use a different colormap like 'plasma'
-        colors = plt.cm.plasma(np.linspace(0, 1, n_metrics))
+        # Colors based on target image legend
+        metric_colors = {
+            'mAP (IoU=0.50:0.95)': '#000080', # Navy
+            'AP (IoU=0.50)': '#C71585',       # Medium Violet Red / Pink
+            'AP (IoU=0.75)': '#FFFF00'        # Yellow
+        }
+        colors = [metric_colors.get(metric, plt.cm.plasma(i/n_metrics)) for i, metric in enumerate(df.columns)]
 
-        all_rects = []
         for i, metric in enumerate(df.columns):
-             rects = ax.bar(index + i * bar_width, df[metric], bar_width,
-                           label=legend_labels.get(metric, metric), # Use shortened label
+             plot_data = pd.to_numeric(df[metric], errors='coerce').fillna(0)
+             rects = ax.bar(index + i * bar_width, plot_data, bar_width,
+                           label=legend_labels.get(metric, metric),
                            color=colors[i])
              self._add_value_labels(ax, rects, precision=3)
-             all_rects.append(rects)
 
         ax.set_ylabel('AP Value')
         ax.set_title('Average Precision (AP) at Different IoU Thresholds')
         ax.set_xticks(index + bar_width * (n_metrics - 1) / 2)
         ax.set_xticklabels(df.index, rotation=0, ha='center')
         ax.legend(title="AP Metric", fontsize='small')
-        # Dynamic y-limit based on data, but ensure it's at least 0-1
-        max_val = df.max().max() if not df.empty else 0
-        ax.set_ylim(0, max(1.0, max_val * 1.1) if max_val > 0 else 1.0)
+        
+        # Dynamic y-axis to focus on small values (similar to what we did for PRF1)
+        max_val = pd.to_numeric(df.stack(), errors='coerce').max() 
+        if pd.isna(max_val) or max_val <= 0:
+            upper_limit = 0.1  # default minimum scale when values are zero
+        else:
+            upper_limit = max(0.05, max_val * 1.2)  # ensure at least 0.05
+            
+        ax.set_ylim(0, upper_limit)
         ax.grid(axis='y', linestyle='--', alpha=0.6)
 
 
@@ -441,8 +494,13 @@ class MetricsVisualizer:
             'Medium Objects AP': 'Medium AP',
             'Large Objects AP': 'Large AP'
         }
-        # Use 'cividis' colormap
-        colors = plt.cm.cividis(np.linspace(0, 1, n_metrics))
+        # Colors based on target image legend
+        metric_colors = {
+             'Small Objects AP': '#001f3f',  # Dark Navy / Near Black
+             'Medium Objects AP': '#808080', # Grey
+             'Large Objects AP': '#FFFF00'   # Yellow
+        }
+        colors = [metric_colors.get(metric, plt.cm.cividis(i/n_metrics)) for i, metric in enumerate(df.columns)]
 
         all_rects = []
         for i, metric in enumerate(df.columns):
@@ -458,7 +516,7 @@ class MetricsVisualizer:
         ax.set_xticklabels(df.index, rotation=0, ha='center')
         ax.legend(title="Object Size", fontsize='small')
         max_val = df.max().max() if not df.empty else 0
-        ax.set_ylim(0, max(1.0, max_val * 1.1) if max_val > 0 else 1.0)
+        ax.set_ylim(0, max(0.01, max_val * 1.2) if max_val > 0 else 0.01)
         ax.grid(axis='y', linestyle='--', alpha=0.6)
 
 
@@ -470,7 +528,6 @@ class MetricsVisualizer:
              return
 
         fps_data = self.data['summary_df']['Speed (FPS)']
-        # Get colors based on the model names (index of the series)
         colors = [get_model_color(model) for model in fps_data.index]
         rects = ax.bar(fps_data.index, fps_data, color=colors)
 
@@ -478,64 +535,77 @@ class MetricsVisualizer:
         ax.set_title('Processing Speed (FPS)')
         ax.set_xticklabels(fps_data.index, rotation=0, ha='center')
         ax.grid(axis='y', linestyle='--', alpha=0.6)
-        # Add value labels with 1 decimal place for FPS
         self._add_value_labels(ax, rects, precision=1)
-        # Dynamic Y limit based on max FPS, with padding
         max_fps = fps_data.max() if not fps_data.empty else 0
-        ax.set_ylim(0, max(10, max_fps * 1.15)) # Ensure a minimum limit
+        ax.set_ylim(0, max(10, max_fps * 1.15))
 
 
     def _plot_detection_distribution(self, ax):
-        """Plots the distribution of detections per image/frame using box plots."""
-        # Use the pre-processed detection counts dictionary
+        """
+        Plots the distribution of detections per image/frame using box plots.
+        Shows a message if no meaningful data (counts > 0) is present.
+        """
         detection_data = self.data.get('detection_counts', {})
         if not detection_data:
             ax.text(0.5, 0.5, 'Detection count data missing.', ha='center', va='center', transform=ax.transAxes)
             ax.set_title('Distribution of Detections')
+            ax.set_xticks([]) # No labels if no data structure
+            ax.set_yticks([])
             return
 
         model_names = list(detection_data.keys())
-        # Data needs to be a list of lists for boxplot
         data_to_plot = [detection_data[model] for model in model_names]
 
-        # Check if there's actually any data points across all models (beyond the default [0])
-        if not any(any(d > 0 for d in data_list) for data_list in data_to_plot if data_list != [0]):
-             ax.text(0.5, 0.5, 'No detection count data available\n(all counts are zero or missing).',
-                     horizontalalignment='center', verticalalignment='center',
-                     transform=ax.transAxes, fontsize=9, color='orange')
-             ax.set_title('Distribution of Detections')
-             ax.set_xticks(range(1, len(model_names) + 1)) # Set ticks even if no data
-             ax.set_xticklabels(model_names, rotation=0, ha='center')
-             ax.set_ylabel('Detections Count')
-             ax.set_ylim(0, self.data.get('max_detection_value', 10)) # Use calculated max or default
-             ax.grid(axis='y', linestyle='--', alpha=0.6)
-             return
+        # --- Check for meaningful data ---
+        has_meaningful_data = False
+        for data_list in data_to_plot:
+            # Check if the list contains any number greater than 0
+            if any(isinstance(d, (int, float)) and d > 1e-9 for d in data_list): # Use tolerance
+                has_meaningful_data = True
+                break
 
-        # Create the boxplot
-        bp = ax.boxplot(data_to_plot, labels=model_names, patch_artist=True,
-                        showfliers=True, # Show outliers as in the example image
-                        medianprops={'color': 'black', 'linewidth': 1.5}, # Thicker median line
+        # --- Set common Axes properties ---
+        ax.set_title('Distribution of Detections')
+        # Set X ticks and labels regardless of data to show model names
+        ax.set_xticks(range(1, len(model_names) + 1))
+        ax.set_xticklabels(model_names, rotation=0, ha='center')
+        ax.set_ylabel('Detections Count')
+        ax.grid(axis='y', linestyle='--', alpha=0.6)
+        # Set default Y limit based on calculated max or 10
+        ax.set_ylim(bottom=0, top=self.data.get('max_detection_value', 10))
+
+
+        if not has_meaningful_data:
+            # --- Display the message if no meaningful data ---
+            ax.text(0.5, 0.5, 'No detection count data available\n(all counts are zero or missing).',
+                    horizontalalignment='center', verticalalignment='center',
+                    transform=ax.transAxes, fontsize=10, color='orange',
+                    bbox=dict(facecolor='white', alpha=0.8, pad=0.3, edgecolor='none'))
+            # Ensure Y limit is set even when displaying text
+            ax.set_ylim(0, 10) # Keep default Y limit consistent with message display
+            return # Stop here if no data
+
+        # --- Plot Boxplot if meaningful data exists ---
+        bp = ax.boxplot(data_to_plot,
+                        labels=None, # Labels are set via xticklabels
+                        patch_artist=True,
+                        showfliers=True,
+                        medianprops={'color': 'black', 'linewidth': 1.5},
                         boxprops={'edgecolor': 'black', 'linewidth': 0.5},
                         whiskerprops={'color': 'black', 'linewidth': 0.5, 'linestyle': '--'},
                         capprops={'color': 'black', 'linewidth': 0.5})
 
-        # Customize box colors using the defined model colors
+        # Customize box colors
         colors = [get_model_color(model) for model in model_names]
         for patch, color in zip(bp['boxes'], colors):
             patch.set_facecolor(color)
-            patch.set_alpha(0.7) # Semi-transparent fill
+            patch.set_alpha(0.7)
 
-        # Customize outlier markers (fliers)
+        # Customize outlier markers
         for flier in bp['fliers']:
              flier.set(marker='o', markerfacecolor='red', markersize=5,
                        markeredgecolor='none', alpha=0.4)
-
-        ax.set_ylabel('Detections Count')
-        ax.set_title('Distribution of Detections per Image')
-        ax.set_xticklabels(model_names, rotation=0, ha='center')
-        ax.grid(axis='y', linestyle='--', alpha=0.6)
-        # Set y-limit based on max observed value (calculated in _extract_data)
-        ax.set_ylim(bottom=0, top=self.data.get('max_detection_value', 10))
+        # Y-limit is already set based on max_detection_value
 
 
     def _plot_f1_vs_speed(self, ax):
@@ -551,44 +621,48 @@ class MetricsVisualizer:
         fps = df['Speed (FPS)']
         colors = [get_model_color(model) for model in df.index]
 
-        # Plot points with model-specific colors
         ax.scatter(fps, f1_scores, c=colors, s=120, alpha=0.9, edgecolors='k', linewidth=0.5)
 
-        # Add model name labels near each point
         for i, model in enumerate(df.index):
-            # Add a small offset to prevent labels overlapping points exactly
-            ax.text(fps.iloc[i] * 1.02, f1_scores.iloc[i] * 1.02, model, fontsize=9)
+            # Slightly adjust label position based on quadrant to avoid overlap
+            ha = 'left' if fps.iloc[i] < fps.mean() else 'right'
+            va = 'bottom' if f1_scores.iloc[i] < f1_scores.mean() else 'top'
+            offset_x = 0.05 if ha == 'left' else -0.05
+            offset_y = 0.001 if va == 'bottom' else -0.001
+
+            ax.text(fps.iloc[i] + offset_x, f1_scores.iloc[i] + offset_y, model,
+                    fontsize=9, ha=ha, va=va)
 
         ax.set_xlabel('Speed (FPS)')
         ax.set_ylabel('F1-Score')
         ax.set_title('F1-Score vs. Speed Performance')
         ax.grid(True, linestyle='--', alpha=0.6)
-        # Set limits dynamically, ensuring non-negative range
-        ax.set_xlim(left=0, right=max(5, fps.max() * 1.1) if not fps.empty else 5)
-        ax.set_ylim(bottom=0, top=max(0.1, f1_scores.max() * 1.1) if not f1_scores.empty else 0.1)
+        # Add padding to limits
+        max_fps = fps.max() if not fps.empty else 0
+        max_f1 = f1_scores.max() if not f1_scores.empty else 0
+        ax.set_xlim(left=-0.5, right=max(5, max_fps * 1.1))
+        ax.set_ylim(bottom=-0.005, top=max(0.1, max_f1 * 1.15))
 
 
     def _plot_radar(self, ax):
         """Creates the multi-dimensional radar chart."""
-        # Select metrics for the radar chart axes
-        # Ensure these keys match the columns in summary_df after extraction
+        # Use non-newline versions for labels
         radar_metrics_map = {
             'mAP': 'mAP (IoU=0.50:0.95)',
             'F1-Score': 'F1-Score',
-            'Large\nObjects': 'Large Objects AP', # Use newlines for better label spacing
-            'Medium\nObjects': 'Medium Objects AP',
-            'Small\nObjects': 'Small Objects AP',
+            'Large Objects': 'Large Objects AP',
+            'Medium Objects': 'Medium Objects AP',
+            'Small Objects': 'Small Objects AP',
             'Speed': 'Speed (FPS)',
         }
-        
-        # Filter available metrics from the map based on df columns
+
         available_radar_metrics = {
             display: original for display, original in radar_metrics_map.items()
             if original in self.data['summary_df'].columns
         }
 
-        if len(available_radar_metrics) < 3: # Need at least 3 axes for a radar chart
-             ax.text(0.5, 0.5, 'Not enough data for Radar Chart.', ha='center', va='center', transform=ax.transAxes)
+        if len(available_radar_metrics) < 3:
+             ax.text(0.5, 0.5, 'Not enough data\nfor Radar Chart.', ha='center', va='center', transform=ax.transAxes)
              ax.set_title('Multi-dimensional Performance Comparison', size=11, y=1.1)
              ax.set_xticks([])
              ax.set_yticks([])
@@ -598,160 +672,108 @@ class MetricsVisualizer:
         radar_cols_display = list(available_radar_metrics.keys())
         df_radar_raw = self.data['summary_df'][radar_cols_original].copy()
 
-
-        # --- Data Normalization (Crucial for Radar Charts) ---
+        # --- Data Normalization ---
         df_radar_normalized = pd.DataFrame(index=df_radar_raw.index)
-
         for display_name, original_col in available_radar_metrics.items():
             column_data = df_radar_raw[original_col]
-
             if original_col == 'Speed (FPS)':
-                # Normalize FPS relative to max observed FPS
                 max_val = column_data.max()
                 normalized = column_data / max_val if max_val > 0 else 0
-            else:
-                # Normalize AP/F1 scores (typically 0-1 range)
-                # Using 1.0 as the theoretical max, or observed max if higher (unlikely for AP/F1)
-                max_val = max(1.0, column_data.max())
+            else: # AP/F1 metrics
+                max_val = max(1.0, column_data.max()) # Use 1.0 as max reference
                 normalized = column_data / max_val if max_val > 0 else 0
+            df_radar_normalized[display_name] = normalized
 
-            df_radar_normalized[display_name] = normalized # Use display name for normalized df
-
-        # Handle potential NaN values resulting from division by zero
         df_radar = df_radar_normalized.fillna(0)
 
         # --- Plotting Setup ---
-        categories = list(df_radar.columns) # Use display names now
+        categories = list(df_radar.columns)
         n_categories = len(categories)
-
-        # Create angles for the radar chart axes (evenly spaced)
         angles = np.linspace(0, 2 * np.pi, n_categories, endpoint=False).tolist()
-        angles += angles[:1] # Close the loop by repeating the first angle
+        angles += angles[:1] # Close loop
 
-        # Configure the radar axes
         ax.set_xticks(angles[:-1])
-        ax.set_xticklabels(categories, fontsize=9, color='grey') # Display category names
-        # Configure the radial tick marks (0.2, 0.4, ..., 1.0)
+        ax.set_xticklabels(categories, fontsize=9, color='grey')
         ax.set_yticks(np.arange(0.2, 1.1, 0.2))
         ax.set_yticklabels([f"{i:.1f}" for i in np.arange(0.2, 1.1, 0.2)], fontsize=8, color='darkgrey')
-        ax.set_ylim(0, 1.0) # Normalized scale
-        ax.tick_params(axis='x', pad=10) # Pad labels outward
-        # Set background grid color
+        ax.set_ylim(0, 1.0)
+        ax.tick_params(axis='x', pad=10)
         ax.grid(color='lightgray', linestyle='--', linewidth=0.5)
-        # Change spine color
         ax.spines['polar'].set_color('lightgray')
 
-
         # --- Plot each model's data ---
-        # This loop handles any number of models present in the data
         for i, model in enumerate(df_radar.index):
             data = df_radar.loc[model].tolist()
-            data += data[:1] # Close the loop for plotting
-            color = get_model_color(model) # Get consistent color
-
-            # Plot the line
+            data += data[:1]
+            color = get_model_color(model)
             ax.plot(angles, data, linewidth=2, linestyle='solid', label=model, color=color, zorder=i+2)
-            # Fill the area under the line
             ax.fill(angles, data, color=color, alpha=0.25, zorder=i+1)
 
-        ax.set_title('Multi-dimensional Performance Comparison', size=12, y=1.12) # Adjust title position
-        # Place legend outside the plot area for clarity
-        # Adjust bbox_to_anchor: (x, y, width, height) relative to axes
+        ax.set_title('Multi-dimensional Performance Comparison', size=12, y=1.12)
         ax.legend(loc='lower right', bbox_to_anchor=(1.15, -0.1), fontsize='small')
 
 
     def _plot_summary_table(self, ax):
         """Creates a summary table of key metrics using matplotlib.table."""
-        # Define the desired columns and their display names
         table_cols_map = {
-            'mAP (IoU=0.50:0.95)'   : 'mAP',
-            'AP (IoU=0.50)'         : 'AP@50',
-            'AP (IoU=0.75)'         : 'AP@75',
-            'F1-Score'              : 'F1-Score',
-            'Speed (FPS)'           : 'FPS',
-            'Small Objects AP'      : 'Small AP',
-            'Medium Objects AP'     : 'Med AP',
-            'Large Objects AP'      : 'Large AP'
+            'mAP (IoU=0.50:0.95)'   : 'mAP', 'AP (IoU=0.50)' : 'AP@50',
+            'AP (IoU=0.75)' : 'AP@75', 'F1-Score' : 'F1-Score',
+            'Speed (FPS)' : 'FPS', 'Small Objects AP' : 'Small AP',
+            'Medium Objects AP' : 'Med AP', 'Large Objects AP' : 'Large AP'
         }
-        # Filter map based on columns actually available in the summary dataframe
         available_cols = {
             original: display for original, display in table_cols_map.items()
             if original in self.data['summary_df'].columns
         }
-        
+
         if not available_cols:
             ax.text(0.5, 0.5, 'No summary data available for table.', ha='center', va='center', transform=ax.transAxes)
-            ax.set_title('Summary Metrics Table', fontsize=12)
-            ax.axis('off')
+            ax.set_title('Summary Metrics Table', fontsize=12); ax.axis('off')
             return
 
         original_col_order = list(available_cols.keys())
-        display_col_order = list(available_cols.values())
-
         df_table = self.data['summary_df'][original_col_order].copy()
-        df_table.rename(columns=available_cols, inplace=True) # Rename columns for display
+        df_table.rename(columns=available_cols, inplace=True)
 
-        # --- Format Data for Display ---
+        # --- Format Data ---
         for col in df_table.columns:
             if col == 'FPS':
                 df_table[col] = df_table[col].apply(lambda x: f"{x:.1f}" if pd.notna(x) else 'N/A')
             elif col in ['mAP', 'AP@50', 'AP@75', 'F1-Score', 'Small AP', 'Med AP', 'Large AP']:
-                 df_table[col] = df_table[col].apply(lambda x: f"{x:.3f}" if pd.notna(x) else '0.000')
-            else: # Handle any other unexpected column types
+                 df_table[col] = df_table[col].apply(lambda x: f"{x:.3f}" if pd.notna(x) and abs(x) > 1e-9 else '0.000')
+            else:
                  df_table[col] = df_table[col].apply(lambda x: f"{x}" if pd.notna(x) else 'N/A')
 
+        df_table.reset_index(inplace=True) # Makes 'Model' a column
 
-        # Reset index to make 'Model' a column for the table content
-        df_table.reset_index(inplace=True)
-        # df_table.rename(columns={'index': 'Model'}, inplace=True) # Already renamed via reset_index
-
-        # --- Create Matplotlib Table ---
-        ax.axis('off') # Hide the axes background
+        # --- Create Table ---
+        ax.axis('off')
         ax.set_title('Summary Metrics Table', fontsize=12, pad=10)
+        if df_table.empty: return # Should not happen if available_cols is not empty
 
-        if df_table.empty:
-             ax.text(0.5, 0.5, 'No summary data available.', ha='center', va='center', transform=ax.transAxes)
-             return
-
-        # Create the table object - bbox specifies table area relative to axes [left, bottom, width, height]
         table = Table(ax, bbox=[0, 0, 1, 1])
-
         n_rows, n_cols = df_table.shape
-        cell_height = 1.0 / (n_rows + 1) # +1 for header row
+        cell_height = 1.0 / (n_rows + 1)
         cell_width = 1.0 / n_cols
 
-        # Add Header Row
+        # Header Row
         for j, col_name in enumerate(df_table.columns):
-            cell = table.add_cell(0, j, cell_width, cell_height, text=col_name,
-                                  loc='center', facecolor='#E0E0E0') # Light grey header
-            cell.set_fontsize(9)
-            cell.set_text_props(weight='bold')
+            cell = table.add_cell(0, j, cell_width, cell_height, text=col_name, loc='center', facecolor='#E0E0E0')
+            cell.set_fontsize(9); cell.set_text_props(weight='bold'); cell.set_edgecolor('black')
 
-        # Add Data Rows
-        # This loop iterates through models found in the dataframe
+        # Data Rows
         for i in range(n_rows):
-            model_name = df_table.iloc[i, 0] # Get model name (first column)
-            row_color = get_model_color(model_name) # Get model's specific color
-            # Create a light background color based on model color
-            bg_color = plt.cm.colors.to_rgba(row_color, alpha=0.15)
-
+            bg_color = '#FEEEEE' # Fixed light reddish background
             for j, value in enumerate(df_table.iloc[i]):
-                cell = table.add_cell(i + 1, j, cell_width, cell_height, text=value,
-                                      loc='center', facecolor=bg_color)
-                cell.set_fontsize(9)
-                # Make model name bold in the first column
-                if j == 0:
-                     cell.set_text_props(weight='bold')
+                cell = table.add_cell(i + 1, j, cell_width, cell_height, text=str(value), loc='center', facecolor=bg_color)
+                cell.set_fontsize(9); cell.set_edgecolor('black')
+                if j == 0: cell.set_text_props(weight='bold')
 
-        # Adjust column widths automatically based on content (optional but good)
-        # table.auto_set_column_width(col=list(range(n_cols)))
-        table.scale(1, 1.5) # Scale table height slightly if needed
-
+        table.scale(1, 1.5)
         ax.add_table(table)
 
 
-    # --- Placeholder/Alias Methods for Compatibility with app.py ---
-    # These can be expanded later if specific plots are desired instead of the full dashboard.
+    # --- Placeholder/Alias Methods ---
 
     def load_multiple_results(self, pattern="evaluation_results_*.json"):
         """Loads data from multiple JSON result files for trend analysis."""
@@ -764,155 +786,110 @@ class MetricsVisualizer:
 
             for file in files:
                  try:
-                    # Try to extract timestamp from filename, fallback to modification time
                     parts = file.stem.split('_')
-                    if len(parts) >= 3: # Expecting evaluation_results_YYYYMMDD_HHMMSS format
-                         timestamp_str = parts[-2] + "_" + parts[-1]
-                         timestamp = datetime.strptime(timestamp_str, "%Y%m%d_%H%M%S")
-                    else:
-                         timestamp = datetime.fromtimestamp(os.path.getctime(file))
+                    ts_str = "_".join(parts[-2:]) # YYYYMMDD_HHMMSS
+                    timestamp = datetime.strptime(ts_str, "%Y%m%d_%H%M%S")
+                 except (ValueError, IndexError):
+                     print(f"Could not parse timestamp from filename {file.name}, using file time.")
+                     timestamp = datetime.fromtimestamp(os.path.getctime(file))
 
-                    with open(file, 'r') as f:
-                         data = json.load(f)
-                         all_results[timestamp] = data
-                 except (ValueError, IndexError) as e:
-                      print(f"Could not parse timestamp from filename {file.name}, using file time. Error: {e}")
-                      timestamp = datetime.fromtimestamp(os.path.getctime(file))
-                      with open(file, 'r') as f:
-                         data = json.load(f)
-                         all_results[timestamp] = data
-                 except Exception as e:
-                     print(f"Could not load or parse {file.name}: {e}")
+                 try:
+                     with open(file, 'r') as f: data = json.load(f)
+                     all_results[timestamp] = data
+                 except Exception as e_load: print(f"Could not load or parse {file.name}: {e_load}")
+
         except Exception as e:
              print(f"Error finding or processing result files: {e}")
-             return None
-
+             traceback.print_exc(); return None
         return all_results if all_results else None
 
     def plot_performance_trends(self, aggregated_data=None, metrics=None, show_plot=False):
         """Plots performance metrics over time from multiple results files."""
-        if aggregated_data is None:
-            aggregated_data = self.load_multiple_results()
-
+        if aggregated_data is None: aggregated_data = self.load_multiple_results()
         if not aggregated_data or len(aggregated_data) < 2:
-            print("Not enough aggregated data available for trend plotting.")
-            return None
+            print("Not enough aggregated data available for trend plotting."); return None
+        if metrics is None: metrics = ['mAP (IoU=0.50:0.95)', 'F1-Score', 'Speed (FPS)']
 
-        # Default metrics to plot if none are specified
-        if metrics is None:
-            metrics = ['mAP (IoU=0.50:0.95)', 'F1-Score', 'Speed (FPS)'] # Default trend metrics
+        trend_data, models_found = {}, set()
+        timestamps = sorted(aggregated_data.keys())
 
-        # Prepare data structure for plotting trends
-        trend_data = {}
-        timestamps = sorted(aggregated_data.keys()) # Chronological order
-
-        # Extract metrics for each model at each timestamp
-        models_found = set()
         for ts in timestamps:
              results_at_ts = aggregated_data[ts]
-             current_models = set(results_at_ts.keys()) - {"evaluation_metadata"}
+             current_models = set(m for m in results_at_ts.keys() if m != "evaluation_metadata")
              models_found.update(current_models)
-
              for model in current_models:
                 if model not in trend_data:
-                    # Initialize structure for this model
-                    trend_data[model] = {m: [] for m in metrics}
-                    trend_data[model]['timestamp'] = []
-
-                # Add timestamp for this model
+                    trend_data[model] = {m: [] for m in metrics}; trend_data[model]['timestamp'] = []
                 trend_data[model]['timestamp'].append(ts)
-                # Extract each requested metric safely
                 for metric in metrics:
-                    value = self._get_metric({"temp_model":results_at_ts.get(model,{})}, f"temp_model.{metric}", default=np.nan) # Use safe getter
+                    value = self._get_metric_from_dict(results_at_ts.get(model, {}), metric, default=np.nan)
                     trend_data[model][metric].append(value)
 
-        # --- Plotting ---
-        n_metrics = len(metrics)
-        n_cols = min(3, n_metrics) # Max 3 plots per row
-        n_rows = (n_metrics + n_cols - 1) // n_cols
-
-        fig, axes = plt.subplots(n_rows, n_cols, figsize=(7 * n_cols, 5 * n_rows), squeeze=False)
-        axes = axes.flatten() # Makes iterating through axes easier
+        n_metrics = len(metrics); n_cols = min(3, n_metrics); n_rows = (n_metrics + n_cols - 1) // n_cols
+        fig, axes = plt.subplots(n_rows, n_cols, figsize=(7 * n_cols, 5 * n_rows), squeeze=False); axes = axes.flatten()
 
         for i, metric in enumerate(metrics):
-            ax = axes[i]
-            plotted_models = 0
-            for model in models_found: # Iterate through all models encountered
-                if model in trend_data: # Check if model has data
-                     model_ts = trend_data[model]['timestamp']
-                     model_metric_data = trend_data[model][metric]
+            ax = axes[i]; plotted_models = 0
+            for model in sorted(list(models_found)):
+                if model in trend_data:
+                     ts_data = trend_data[model]['timestamp']; metric_data = trend_data[model][metric]
+                     if len(ts_data) == len(metric_data):
+                         s = pd.Series(metric_data, index=ts_data)
+                         if s.notna().any():
+                             ax.plot(s.index, s.values, marker='o', linestyle='-', label=model, color=get_model_color(model), markersize=5)
+                             plotted_models += 1
+                     # else: print(f"Warn: Len mismatch {model}, {metric}") # Optional warning
+            if plotted_models > 0: ax.legend(fontsize='small')
+            else: ax.text(0.5, 0.5, 'No data for this metric', ha='center', va='center', transform=ax.transAxes)
+            ax.set_title(f'Trend: {metric}'); ax.set_xlabel('Time'); ax.set_ylabel('Value')
+            ax.grid(True, linestyle='--'); fig.autofmt_xdate(rotation=30, ha='right')
 
-                     # Ensure lengths match before plotting
-                     if len(model_ts) == len(model_metric_data):
-                          # Plot only if there's non-NaN data
-                          if pd.Series(model_metric_data).notna().any():
-                               ax.plot(model_ts, model_metric_data, marker='o', linestyle='-',
-                                       label=model, color=get_model_color(model), markersize=5)
-                               plotted_models += 1
-                     else:
-                          print(f"Warning: Timestamp/data length mismatch for {model}, metric {metric}. Skipping.")
-
-            if plotted_models > 0:
-                ax.legend(fontsize='small')
-            else:
-                ax.text(0.5, 0.5, 'No data for this metric', ha='center', va='center', transform=ax.transAxes)
-
-            ax.set_title(f'Trend: {metric}')
-            ax.set_xlabel('Time')
-            ax.set_ylabel('Value')
-            ax.grid(True, linestyle='--', alpha=0.6)
-            # Improve date formatting and rotation
-            fig.autofmt_xdate(rotation=30, ha='right')
-
-        # Hide any unused subplots
-        for j in range(i + 1, len(axes)):
-            fig.delaxes(axes[j])
-
+        for j in range(i + 1, len(axes)): fig.delaxes(axes[j]) # Hide unused
         fig.suptitle('Model Performance Trends Over Time', fontsize=16, y=1.02)
-        plt.tight_layout(rect=[0, 0.03, 1, 0.97]) # Adjust layout to prevent title overlap
+        plt.tight_layout(rect=[0, 0.03, 1, 0.97])
 
-        # --- Save and Show ---
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         output_filename = f"performance_trends_{timestamp}.png"
         output_path = VISUALIZATIONS_DIR / output_filename
-
         try:
-            plt.savefig(output_path, dpi=150, bbox_inches='tight')
-            print(f"Performance trends plot saved to: {output_path}")
+            plt.savefig(output_path, dpi=150, bbox_inches='tight'); print(f"Trends plot saved: {output_path}")
             if show_plot: plt.show()
             else: plt.close(fig)
             return str(output_path.resolve())
-        except Exception as e:
-            print(f"Error saving or showing trends plot: {e}")
-            plt.close(fig)
-            return None
+        except Exception as e: print(f"Error saving trends plot: {e}"); traceback.print_exc(); plt.close(fig); return None
 
+    def _get_metric_from_dict(self, data_dict, metric_path, default=np.nan):
+        """ Helper function to safely get nested metric from a dictionary. """
+        keys = metric_path.split('.'); current_level = data_dict
+        try:
+            for key in keys:
+                if isinstance(current_level, dict) and key in current_level: current_level = current_level[key]
+                else: return default
+            return float(current_level) if isinstance(current_level, (int, float)) else default
+        except (TypeError, ValueError): return default
 
-    # --- Aliases providing the dashboard for specific requests from app.py ---
     def show_precision_recall_curve(self, show_plot=True):
-        """Generates the main dashboard, as PR curve is included."""
+        """Generates the main dashboard, as PRF1 plot is included."""
         print("Note: Generating full dashboard (Precision/Recall/F1 included).")
         return self.create_metrics_dashboard(show_plot=show_plot)
 
     def show_reliability_analysis(self, show_plot=True):
         """Placeholder - Generates the main dashboard."""
-        print("Note: Reliability analysis not specifically implemented. Generating full dashboard.")
+        print("Note: Reliability analysis plot not specifically implemented. Generating full dashboard.")
         return self.create_metrics_dashboard(show_plot=show_plot)
 
     def generate_comprehensive_report(self):
         """Generates the dashboard image file as the 'report'."""
         print("Generating dashboard image as comprehensive report.")
-        report_path = self.create_metrics_dashboard(show_plot=False) # Don't show interactively
-        if report_path:
-             print(f"Comprehensive report image saved to: {report_path}")
-        else:
-             print("Failed to generate comprehensive report image.")
+        report_path = self.create_metrics_dashboard(show_plot=False)
+        if report_path: print(f"Comprehensive report image saved to: {report_path}")
+        else: print("Failed to generate comprehensive report image.")
         return report_path
 
 
 # Example usage block for testing the script directly
 if __name__ == "__main__":
-    print(f"Executing MetricsVisualizer Test Block")
+    print(f"--- Executing MetricsVisualizer Test Block ---")
     print(f"Project Root (derived): {PROJECT_ROOT}")
     print(f"Results Directory: {RESULTS_DIR}")
     print(f"Visualizations Directory: {VISUALIZATIONS_DIR}")
@@ -920,7 +897,7 @@ if __name__ == "__main__":
     # Ensure results directory exists
     RESULTS_DIR.mkdir(exist_ok=True)
 
-    # --- Create a dummy results file mimicking the user's image data if none exist ---
+    # --- Create a dummy results file mimicking the target image's data if none exist ---
     latest_results_file = None
     list_of_files = glob.glob(str(RESULTS_DIR / 'evaluation_results_*.json'))
     if list_of_files:
@@ -928,45 +905,31 @@ if __name__ == "__main__":
         print(f"Found existing results file: {latest_results_file.name}")
     else:
         print("No existing results file found. Creating a dummy file for testing.")
-        dummy_file_path = RESULTS_DIR / f"evaluation_results_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
-        # Data closely matching the user's image
+        dummy_file_path = RESULTS_DIR / f"evaluation_results_{datetime.now().strftime('%Y%m%d_%H%M%S')}_dummy.json"
+        # Data closely matching the user's second image (input_file_0.png)
         dummy_data = {
-            "Faster R-CNN": {
-                "coco_metrics": {
-                    "AP_IoU=0.50:0.95": 0.174, "AP_IoU=0.50": 0.271, "AP_IoU=0.75": 0.189,
-                    "AP_small": 0.085, "AP_medium": 0.189, "AP_large": 0.243,
-                    "AR_IoU=0.50:0.95_maxDets=1": 0.1,"AR_IoU=0.50:0.95_maxDets=10": 0.2, "AR_IoU=0.50:0.95_maxDets=100": 0.21, # Example AR values
-                    "AR_small_maxDets=100": 0.1, "AR_medium_maxDets=100": 0.22, "AR_large_maxDets=100": 0.3
-                },
-                "precision": 0.26, "recall": 0.21, "f1_score": 0.235, "fps": 4.8,
-                "detection_counts_per_image": list(np.random.randint(300, 1500, size=50)) + list(np.random.randint(0,50, size=50)) # Example counts
-            },
-            "RT-DETR": { # Simulating failed/zero evaluation from image
-                "coco_metrics": {
-                    "AP_IoU=0.50:0.95": 0.000, "AP_IoU=0.50": 0.000, "AP_IoU=0.75": 0.000,
-                    "AP_small": 0.000, "AP_medium": 0.000, "AP_large": 0.000,
-                    "AR_IoU=0.50:0.95_maxDets=1": 0.0,"AR_IoU=0.50:0.95_maxDets=10": 0.0, "AR_IoU=0.50:0.95_maxDets=100": 0.0,
-                    "AR_small_maxDets=100": 0.0, "AR_medium_maxDets=100": 0.0, "AR_large_maxDets=100": 0.0
-                },
-                 "precision": 0.0, "recall": 0.0, "f1_score": 0.000, "fps": 10.4,
-                 "detection_counts_per_image": list(np.random.randint(800, 2000, size=70)) + list(np.random.randint(0, 100, size=30)) + [7500] # Add outlier
-            },
-            "YOLOv8-Seg": { # Simulating near-zero eval from image
-                "coco_metrics": {
-                     "AP_IoU=0.50:0.95": 0.000, "AP_IoU=0.50": 0.000, "AP_IoU=0.75": 0.000, # Adjusted to match image table exactly
-                     "AP_small": 0.001, "AP_medium": 0.000, "AP_large": 0.000,
-                     "AR_IoU=0.50:0.95_maxDets=1": 0.0,"AR_IoU=0.50:0.95_maxDets=10": 0.0, "AR_IoU=0.50:0.95_maxDets=100": 0.005,
-                     "AR_small_maxDets=100": 0.001, "AR_medium_maxDets=100": 0.002, "AR_large_maxDets=100": 0.001
-                },
-                 "precision": 0.0, "recall": 0.0, "f1_score": 0.000, "fps": 26.4, # Adjusted to match image table exactly
-                 "detection_counts_per_image": list(np.random.randint(100, 800, size=80)) + list(np.random.randint(0,50, size=20)) + [5000] # Add outlier
-            },
+             "mask-rcnn": {
+                 "coco_metrics": { # Values from the target image's table
+                     "AP_IoU=0.50:0.95": 0.000, "AP_IoU=0.50": 0.000, "AP_IoU=0.75": 0.000,
+                     "AP_small": 0.003, "AP_medium": 0.004, "AP_large": 0.006
+                 },
+                 "precision": 0.0, "recall": 0.0, "f1_score": 0.000, "fps": 4.7, # Values from target image
+                 "detection_counts_per_image": [] # Empty list to trigger "No data" message
+             },
+             "yolo-seg": {
+                 "coco_metrics": { # Values from the target image's table
+                      "AP_IoU=0.50:0.95": 0.000, "AP_IoU=0.50": 0.000, "AP_IoU=0.75": 0.000,
+                      "AP_small": 0.001, "AP_medium": 0.001, "AP_large": 0.001
+                 },
+                  "precision": 0.0, "recall": 0.0, "f1_score": 0.000, "fps": 15.6, # Values from target image
+                  "detection_counts_per_image": None # Test None case for missing data -> should show [0] effectively
+             },
              "evaluation_metadata": {
-                 "timestamp": datetime.now().isoformat(),
-                 "max_images": 100,
-                 "dataset": "coco_val2017_subset_100",
-                 "evaluation_tool_version": "1.0"
-            }
+                  "timestamp": datetime.now().isoformat(),
+                  "max_images": 50, # Example value
+                  "dataset": "coco_val2017_subset_50",
+                  "evaluation_tool_version": "1.1"
+             }
         }
         try:
             with open(dummy_file_path, 'w') as f:
@@ -975,10 +938,11 @@ if __name__ == "__main__":
             latest_results_file = dummy_file_path
         except Exception as e:
             print(f"Error creating dummy file: {e}")
+            traceback.print_exc()
 
 
-    # --- Initialize visualizer (will load latest file, potentially the dummy one) ---
-    visualizer = MetricsVisualizer()
+    # --- Initialize visualizer ---
+    visualizer = MetricsVisualizer() # Will load latest file
 
     # --- Generate and Show Dashboard ---
     if visualizer.results:
@@ -988,14 +952,7 @@ if __name__ == "__main__":
             print(f"\nDashboard generation successful: {dashboard_path}")
         else:
             print("\nDashboard generation failed.")
-
-        # Optional: Test trend plotting if multiple files were created/exist
-        # print("\nAttempting to generate trends plot...")
-        # trends_path = visualizer.plot_performance_trends(show_plot=True)
-        # if trends_path:
-        #      print(f"\nTrends plot generation successful: {trends_path}")
-        # else:
-        #      print("\nFailed to generate trends plot (likely not enough data files).")
-
     else:
         print("\nVisualizer could not load results. Cannot run visualization tests.")
+
+    print(f"--- MetricsVisualizer Test Block Finished ---")

@@ -574,10 +574,7 @@ class ModelEvaluator:
         # Save results
         self.results = results
         self.save_results()
-        
-        # Generate comparisons
-        self.generate_comparison_charts()
-    
+
     def save_results(self):
         """Save evaluation results to JSON file"""
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -598,150 +595,63 @@ class ModelEvaluator:
             json.dump(serializable_results, f, indent=2)
         
         print(f"Results saved to {results_file}")
-    
-    def generate_comparison_charts(self):
-        """Generate comparison charts from evaluation results"""
-        if not self.results:
-            print("No results to generate charts from")
-            return
-        
-        # Extract data for comparison
-        model_types = list(self.results.keys())
-        fps_values = [self.results[m].get("fps", 0) for m in model_types]
-        detection_counts = [self.results[m].get("total_detections", 0) for m in model_types]
-        class_counts = [self.results[m].get("unique_classes_detected", 0) for m in model_types]
-        
-        # Extract COCO mAP values if available
-        map_values = []
-        map_50_values = []
-        
-        for m in model_types:
-            coco_metrics = self.results[m].get("coco_metrics", {})
-            if coco_metrics and isinstance(coco_metrics, dict):
-                map_values.append(coco_metrics.get("AP_IoU=0.50:0.95", 0))
-                map_50_values.append(coco_metrics.get("AP_IoU=0.50", 0))
-            else:
-                map_values.append(0)
-                map_50_values.append(0)
-        
-        # Create comparison dataframe
-        df = pd.DataFrame({
-            "Model": model_types,
-            "FPS": fps_values,
-            "Total Detections": detection_counts,
-            "Unique Classes": class_counts,
-            "mAP (IoU=0.50:0.95)": map_values,
-            "AP (IoU=0.50)": map_50_values
-        })
-        
-        # Save CSV
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        csv_file = RESULTS_DIR / f"model_comparison_{timestamp}.csv"
-        df.to_csv(csv_file, index=False)
-        print(f"Comparison data saved to {csv_file}")
-        
-        # Generate charts
-        plt.figure(figsize=(15, 10))
-        
-        # FPS comparison
-        plt.subplot(2, 3, 1)
-        plt.bar(model_types, fps_values, color=['blue', 'green', 'orange'])
-        plt.title('Performance Comparison (FPS)')
-        plt.ylabel('Frames Per Second')
-        plt.grid(axis='y', linestyle='--', alpha=0.7)
-        
-        # Detection count comparison
-        plt.subplot(2, 3, 2)
-        plt.bar(model_types, detection_counts, color=['blue', 'green', 'orange'])
-        plt.title('Total Detections')
-        plt.grid(axis='y', linestyle='--', alpha=0.7)
-        
-        # Classes detected comparison
-        plt.subplot(2, 3, 3)
-        plt.bar(model_types, class_counts, color=['blue', 'green', 'orange'])
-        plt.title('Unique Classes Detected')
-        plt.grid(axis='y', linestyle='--', alpha=0.7)
-        
-        # mAP comparison
-        plt.subplot(2, 3, 4)
-        plt.bar(model_types, map_values, color=['blue', 'green', 'orange'])
-        plt.title('mAP (IoU=0.50:0.95)')
-        plt.ylabel('Mean Average Precision')
-        plt.grid(axis='y', linestyle='--', alpha=0.7)
-        
-        # AP@0.5 comparison
-        plt.subplot(2, 3, 5)
-        plt.bar(model_types, map_50_values, color=['blue', 'green', 'orange'])
-        plt.title('AP (IoU=0.50)')
-        plt.ylabel('Average Precision')
-        plt.grid(axis='y', linestyle='--', alpha=0.7)
-        
-        # Save the chart
-        plt.tight_layout()
-        chart_file = RESULTS_DIR / f"model_comparison_chart_{timestamp}.png"
-        plt.savefig(chart_file)
-        print(f"Comparison chart saved to {chart_file}")
 
 def main():
-    """Main function"""
     # Parse command line arguments
     parser = argparse.ArgumentParser(description="Evaluate computer vision models on COCO validation set")
-    parser.add_argument("--images", type=int, default=50, 
+    parser.add_argument("--images", type=int, default=50,
                         help=f"Number of COCO val2017 images to use (max {COCO_VAL_TOTAL_IMAGES}, default: 50)")
-    parser.add_argument("--no-vis", action="store_true", 
-                        help="Skip saving visualizations (useful for evaluating many images)")
-    parser.add_argument("--models", type=str, nargs="+", choices=["mask-rcnn", "yolo-seg"], 
+    parser.add_argument("--no-vis", action="store_true",
+                        help="Skip saving individual detection visualizations (dashboard will still be generated)")
+    parser.add_argument("--models", type=str, nargs="+", choices=["mask-rcnn", "yolo-seg"],
                         help="Specific models to evaluate (default: all)")
-    parser.add_argument("--visualize", action="store_true",
-                        help="Generate comprehensive visualization dashboard after evaluation")
-    parser.add_argument("--report", action="store_true",
-                        help="Generate comprehensive HTML report after evaluation")
     args = parser.parse_args()
-    
+
     # Validate args
     max_images = min(max(1, args.images), COCO_VAL_TOTAL_IMAGES)
     if max_images != args.images:
         print(f"Adjusted number of images to {max_images} (valid range: 1-{COCO_VAL_TOTAL_IMAGES})")
-    
-    save_visualizations = not args.no_vis
-    
+
+    save_individual_visualizations = not args.no_vis # Renamed for clarity
+
     # Filter models if specified
     models_to_evaluate = MODELS_TO_EVALUATE
     if args.models:
         models_to_evaluate = [m for m in MODELS_TO_EVALUATE if m["type"] in args.models]
         print(f"Evaluating selected models: {', '.join([m['type'] for m in models_to_evaluate])}")
-    
+
     print("Starting model evaluation...")
-    
+
     # Create evaluator with possibly filtered models list
     evaluator = ModelEvaluator(models_to_evaluate)
-    
+
     # Run evaluation
-    evaluator.run_evaluation(max_images, save_visualizations)
-    
+    evaluator.run_evaluation(max_images, save_individual_visualizations)
+
     print("Evaluation complete!")
-    
-    # Create visualizations if requested
-    if args.visualize or args.report:
-        try:
-            from src.metrics_visualizer import MetricsVisualizer
-            visualizer = MetricsVisualizer()  # Will automatically use latest results
-            
-            if args.report:
-                report_path = visualizer.generate_comprehensive_report()
-                print(f"Comprehensive report generated at: {report_path}")
-            elif args.visualize:
-                dashboard_path = visualizer.create_metrics_dashboard()
-                pr_curve_path = visualizer.create_precision_recall_curve()
-                print(f"Performance dashboard generated at: {dashboard_path}")
-                print(f"Precision-recall curve generated at: {pr_curve_path}")
-        except ImportError as e:
-            print(f"Warning: Could not import metrics visualizer: {e}")
-            print("Skipping enhanced visualizations...")
-        except Exception as e:
-            print(f"Error generating visualizations: {e}")
-            import traceback
-            traceback.print_exc()
+
+    # Always generate the metrics dashboard after evaluation
+    print("\\nGenerating metrics dashboard...")
+    try:
+        # Ensure MetricsVisualizer is imported
+        from src.metrics_visualizer import MetricsVisualizer
+        visualizer = MetricsVisualizer()  # Will automatically use latest results file
+
+        # Create the dashboard
+        dashboard_path = visualizer.create_metrics_dashboard(show_plot=False) # Set show_plot=False to only save
+
+        if dashboard_path:
+            print(f"Metrics dashboard generated successfully at: {dashboard_path}")
+        else:
+            print("Failed to generate metrics dashboard.")
+
+    except ImportError as e:
+        print(f"Warning: Could not import metrics visualizer: {e}")
+        print("Skipping dashboard generation...")
+    except Exception as e:
+        print(f"Error generating dashboard: {e}")
+        import traceback
+        traceback.print_exc()
 
 if __name__ == "__main__":
     main()
