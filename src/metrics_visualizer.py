@@ -386,7 +386,41 @@ class MetricsVisualizer:
              ax.set_title('Precision, Recall, F1-Score Comparison')
              return
 
-        df = self.data['summary_df'][available_metrics]
+        # Get original data
+        orig_df = self.data['summary_df'][available_metrics].copy()
+        
+        # Create a boosted version of the data for better visualization
+        df = pd.DataFrame(index=orig_df.index)
+        
+        # Check if all values are extremely small
+        max_val = orig_df.max().max()
+        min_visible_value = 0.05  # Minimum height for bars to be clearly visible
+        
+        if max_val < 0.01:  # If all values are too small to see properly
+            # Calculate boost needed to make the largest value visible
+            if max_val > 1e-6:  # If we have some non-zero values
+                boost_factor = min_visible_value / max_val  # Make largest value = min_visible_value
+            else:
+                boost_factor = 1000  # Just use a large factor if all values are essentially zero
+                
+            # Apply different boost factors to each value to maintain relative proportions
+            # but make all values visible
+            for model in orig_df.index:
+                for metric in available_metrics:
+                    orig_val = orig_df.loc[model, metric]
+                    if orig_val < 1e-6:  # Almost zero
+                        # Set a small minimum value to ensure bars are visible
+                        df.loc[model, metric] = min_visible_value * 0.2  # 20% of our minimum
+                    else:
+                        # Scale proportionally but ensure value is at least 10% of minimum
+                        boosted_val = orig_val * boost_factor
+                        df.loc[model, metric] = max(boosted_val, min_visible_value * 0.1)
+                        
+            scaled = True  # Flag that we've scaled values
+        else:
+            # Values are large enough to show directly
+            df = orig_df.copy()
+            scaled = False
 
         n_models = len(df)
         n_metrics = len(df.columns)
@@ -404,21 +438,45 @@ class MetricsVisualizer:
         for i, metric in enumerate(df.columns):
             plot_data = pd.to_numeric(df[metric], errors='coerce').fillna(0)
             rects = ax.bar(index + i * bar_width, plot_data, bar_width, label=metric, color=colors[i])
-            self._add_value_labels(ax, rects, precision=3)
+            
+            # Use original values in labels (not the boosted ones)
+            orig_values = pd.to_numeric(orig_df[metric], errors='coerce').fillna(0)
+            
+            # Custom label each bar with the original value
+            for j, rect in enumerate(rects):
+                height = rect.get_height()
+                orig_val = orig_values.iloc[j]
+                
+                # Use more decimal places for very small values
+                if orig_val < 0.01:
+                    label = f'{orig_val:.4f}'  # Show 4 decimal places for small values
+                else:
+                    label = f'{orig_val:.3f}'
+                
+                ax.annotate(label,
+                           xy=(rect.get_x() + rect.get_width() / 2, height),
+                           xytext=(0, 3),  # 3 points vertical offset
+                           textcoords="offset points",
+                           ha='center', va='bottom', fontsize=8)
 
         ax.set_ylabel('Value')
-        ax.set_title('Precision, Recall, F1-Score Comparison')
+        if scaled:
+            ax.set_title('Precision, Recall, F1-Score Comparison\n(Values scaled for visibility)')
+        else:
+            ax.set_title('Precision, Recall, F1-Score Comparison')
+            
         ax.set_xticks(index + bar_width * (n_metrics - 1) / 2)
         ax.set_xticklabels(df.index, rotation=0, ha='center')
         ax.legend(title="Metric", fontsize='small')
 
-        # Dynamic y-axis to focus on small values
-        max_val = pd.to_numeric(df.stack(), errors='coerce').max()
-        if pd.isna(max_val) or max_val <= 0:
-            upper_limit = 1.05  # default
+        # Dynamic y-axis
+        max_plotted = df.max().max()
+        if max_plotted <= 0:
+            upper_limit = 0.1  # default minimum scale when values are zero
         else:
-            upper_limit = max(0.1, max_val * 1.2)  # ensure at least 0.1
-        ax.set_ylim(bottom=0, top=upper_limit)
+            upper_limit = max_plotted * 1.2  # Add 20% headroom
+            
+        ax.set_ylim(0, upper_limit)
         ax.grid(axis='y', linestyle='--', alpha=0.6)
 
 
@@ -431,7 +489,42 @@ class MetricsVisualizer:
              ax.set_title('Average Precision (AP) at Different IoU Thresholds')
              return
 
-        df = self.data['summary_df'][available_metrics]
+        # Get original data
+        orig_df = self.data['summary_df'][available_metrics].copy()
+        
+        # Create a boosted version of the data for better visualization
+        df = pd.DataFrame(index=orig_df.index)
+        
+        # Check if all values are extremely small
+        max_val = orig_df.max().max()
+        min_visible_value = 0.05  # Minimum height for bars to be clearly visible
+        
+        if max_val < 0.01:  # If all values are too small to see properly
+            # Calculate boost needed to make the largest value visible
+            if max_val > 1e-6:  # If we have some non-zero values
+                boost_factor = min_visible_value / max_val  # Make largest value = min_visible_value
+            else:
+                boost_factor = 1000  # Just use a large factor if all values are essentially zero
+                
+            # Apply different boost factors to each value to maintain relative proportions
+            # but make all values visible
+            for model in orig_df.index:
+                for metric in available_metrics:
+                    orig_val = orig_df.loc[model, metric]
+                    if orig_val < 1e-6:  # Almost zero
+                        # Set a small minimum value to ensure bars are visible
+                        df.loc[model, metric] = min_visible_value * 0.2  # 20% of our minimum
+                    else:
+                        # Scale proportionally but ensure value is at least 10% of minimum
+                        boosted_val = orig_val * boost_factor
+                        df.loc[model, metric] = max(boosted_val, min_visible_value * 0.1)
+                        
+            scaled = True  # Flag that we've scaled values
+        else:
+            # Values are large enough to show directly
+            df = orig_df.copy()
+            scaled = False
+
         n_models = len(df)
         n_metrics = len(df.columns)
         bar_width = 0.25
@@ -451,24 +544,47 @@ class MetricsVisualizer:
         colors = [metric_colors.get(metric, plt.cm.plasma(i/n_metrics)) for i, metric in enumerate(df.columns)]
 
         for i, metric in enumerate(df.columns):
-             plot_data = pd.to_numeric(df[metric], errors='coerce').fillna(0)
-             rects = ax.bar(index + i * bar_width, plot_data, bar_width,
-                           label=legend_labels.get(metric, metric),
-                           color=colors[i])
-             self._add_value_labels(ax, rects, precision=3)
+            plot_data = pd.to_numeric(df[metric], errors='coerce').fillna(0)
+            rects = ax.bar(index + i * bar_width, plot_data, bar_width,
+                        label=legend_labels.get(metric, metric),
+                        color=colors[i])
+            
+            # Use original values in labels (not the boosted ones)
+            orig_values = pd.to_numeric(orig_df[metric], errors='coerce').fillna(0)
+            
+            # Custom label each bar with the original value
+            for j, rect in enumerate(rects):
+                height = rect.get_height()
+                orig_val = orig_values.iloc[j]
+                
+                # Use more decimal places for very small values
+                if orig_val < 0.01:
+                    label = f'{orig_val:.4f}'  # Show 4 decimal places for small values
+                else:
+                    label = f'{orig_val:.3f}'
+                
+                ax.annotate(label,
+                           xy=(rect.get_x() + rect.get_width() / 2, height),
+                           xytext=(0, 3),  # 3 points vertical offset
+                           textcoords="offset points",
+                           ha='center', va='bottom', fontsize=8)
 
         ax.set_ylabel('AP Value')
-        ax.set_title('Average Precision (AP) at Different IoU Thresholds')
+        if scaled:
+            ax.set_title('Average Precision (AP) at Different IoU Thresholds\n(Values scaled for visibility)')
+        else:
+            ax.set_title('Average Precision (AP) at Different IoU Thresholds')
+            
         ax.set_xticks(index + bar_width * (n_metrics - 1) / 2)
         ax.set_xticklabels(df.index, rotation=0, ha='center')
         ax.legend(title="AP Metric", fontsize='small')
         
-        # Dynamic y-axis to focus on small values (similar to what we did for PRF1)
-        max_val = pd.to_numeric(df.stack(), errors='coerce').max() 
-        if pd.isna(max_val) or max_val <= 0:
+        # Dynamic y-axis 
+        max_plotted = df.max().max()
+        if max_plotted <= 0:
             upper_limit = 0.1  # default minimum scale when values are zero
         else:
-            upper_limit = max(0.05, max_val * 1.2)  # ensure at least 0.05
+            upper_limit = max_plotted * 1.2  # Add 20% headroom
             
         ax.set_ylim(0, upper_limit)
         ax.grid(axis='y', linestyle='--', alpha=0.6)
