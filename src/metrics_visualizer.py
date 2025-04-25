@@ -254,10 +254,14 @@ class MetricsVisualizer:
         detection_counts = {}
         max_detection_value = 0
 
+        print("\nDEBUG - Extracting Detection Counts:") # <<< ADDED
         for model in self.models:
             counts = self.results.get(model, {}).get("detection_counts_per_image", [])
+            print(f"  -> Model: {model}, Raw counts type: {type(counts)}, Raw counts (first 10): {str(counts)[:100]}...") # <<< ADDED
+
             if isinstance(counts, list) and counts:
                 numeric_counts = [c for c in counts if isinstance(c, (int, float))]
+                print(f"    -> Numeric counts found: {len(numeric_counts)}") # <<< ADDED
                 if numeric_counts:
                     detection_counts[model] = numeric_counts
                     current_max = max(numeric_counts)
@@ -265,16 +269,17 @@ class MetricsVisualizer:
                         max_detection_value = current_max
                 else:
                     # List exists but contains no numeric data
-                    print(f"Warning: 'detection_counts_per_image' for model '{model}' contains no numeric data. Plotting [0].")
+                    print(f"    -> Warning: 'detection_counts_per_image' for model '{model}' contains no numeric data. Plotting [0].")
                     detection_counts[model] = [0]
             else:
                 # If counts are missing, empty, or not a list, add a placeholder [0]
+                print(f"    -> Warning: Counts missing, empty, or not a list for model '{model}'. Plotting [0].") # <<< ADDED
                 detection_counts[model] = [0]
                 if not isinstance(counts, list) and counts is not None: # Avoid warning if key truly missing
-                     print(f"Warning: 'detection_counts_per_image' for model '{model}' is not a list. Found: {type(counts)}. Plotting [0].")
-                # No warning needed if key is missing or list is empty, handled by default [0]
+                     print(f"    -> Detail: 'detection_counts_per_image' for model '{model}' is not a list. Found: {type(counts)}.")
 
-
+        print(f"  -> Final detection_counts keys: {list(detection_counts.keys())}") # <<< ADDED
+        print(f"  -> Calculated max_detection_value: {max_detection_value}") # <<< ADDED
         self.data['detection_counts'] = detection_counts
         # Add padding to the y-limit for the box plot for better visualization
         self.data['max_detection_value'] = max_detection_value * 1.15 if max_detection_value > 0 else 10

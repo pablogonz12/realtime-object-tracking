@@ -198,7 +198,8 @@ class ModelEvaluator:
             "successful_inferences": 0,
             "total_detections": 0,
             "inference_times": [],
-            "detection_counts": {},
+            "detection_counts": {}, # Counts per class
+            "detection_counts_per_image": [], # <<< ADDED: Counts per image
             "classes_detected": set(),
             "failures": 0
         }
@@ -235,6 +236,9 @@ class ModelEvaluator:
                 
                 # Count successful inferences
                 metrics["successful_inferences"] += 1
+                
+                # Record detection count for this image <<< ADDED
+                metrics["detection_counts_per_image"].append(len(detections)) # <<< ADDED
                 
                 # Count total detections
                 metrics["total_detections"] += len(detections)
@@ -464,6 +468,11 @@ class ModelEvaluator:
             print(f"  • Segmentation mAP (IoU=0.50:0.95): {metrics['coco_segm_metrics']['Segm_AP_IoU=0.50:0.95']:.4f}")
             print(f"  • Segmentation AP (IoU=0.50): {metrics['coco_segm_metrics']['Segm_AP_IoU=0.50']:.4f}")
             print(f"  • Segmentation AP (IoU=0.75): {metrics['coco_segm_metrics']['Segm_AP_IoU=0.75']:.4f}")
+        
+        # --- DEBUGGING START ---
+        # print(f"DEBUG ({model_type}): Final detection_counts_per_image (first 10): {metrics.get('detection_counts_per_image', 'MISSING')[:10]}")
+        # print(f"DEBUG ({model_type}): Length of detection_counts_per_image: {len(metrics.get('detection_counts_per_image', []))}")
+        # --- DEBUGGING END ---
         
         return metrics
     
