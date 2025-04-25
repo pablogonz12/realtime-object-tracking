@@ -12,9 +12,6 @@ import time
 from pathlib import Path
 import argparse
 
-# Add project root to path for imports
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-
 # Import model manager and video utilities
 from src.models import ModelManager, DEFAULT_MODEL_PATHS
 from src.video_utils import process_video_with_model

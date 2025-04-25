@@ -30,9 +30,6 @@ from pycocotools.coco import COCO
 from pycocotools.cocoeval import COCOeval
 from pycocotools import mask as maskUtils
 
-# Add project root to path for imports
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-
 # Import model manager
 from src.models import ModelManager, DEFAULT_MODEL_PATHS
 
