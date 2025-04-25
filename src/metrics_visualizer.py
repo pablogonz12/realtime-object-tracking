@@ -123,43 +123,48 @@ class MetricsVisualizer:
         """
         Safely retrieve a potentially nested metric for a given model.
         Handles missing keys or non-numeric values gracefully.
+        Handles cases where the final key name might contain dots.
 
         Args:
             model (str): The name of the model (key in the results dict).
-            metric_path (str): Dot-separated path to the metric (e.g., "coco_metrics.AP_small").
+            metric_path (str): Path to the metric. Can be 'key' or 'parent_key.child_key'.
             default (float): Value to return if the metric is not found or invalid.
 
         Returns:
             float: The metric value or the default.
         """
         if model not in self.results:
-            # print(f"Debug: Model '{model}' not found in results.")
             return default
 
-        value_source = self.results.get(model, {}) # Get the dictionary for the specific model
-        keys = metric_path.split('.')
+        value_source = self.results.get(model, {})
+
         try:
-            current_level = value_source
-            for key in keys:
-                # Check if the current level is a dictionary and contains the key
-                if isinstance(current_level, dict) and key in current_level:
-                    current_level = current_level[key]
+            # Handle potential nesting (assuming max 1 level like 'parent.child')
+            if '.' in metric_path:
+                parent_key, child_key = metric_path.split('.', 1) # Split only on the first dot
+                if isinstance(value_source, dict) and parent_key in value_source:
+                    current_level = value_source[parent_key]
+                    if isinstance(current_level, dict) and child_key in current_level:
+                        final_raw_value = current_level[child_key]
+                    else:
+                        return default
                 else:
-                    # Key not found at this level
-                    # print(f"Debug: Key '{key}' not found for model '{model}' in path '{metric_path}'")
                     return default
+            else:
+                # Top-level key
+                if isinstance(value_source, dict) and metric_path in value_source:
+                    final_raw_value = value_source[metric_path]
+                else:
+                    return default
+
             # Final value obtained, try converting to float
-            # Handle None explicitly before float conversion
-            return float(current_level) if current_level is not None else default
+            final_value = float(final_raw_value) if final_raw_value is not None else default
+            return final_value
+
         except (TypeError, ValueError) as e:
-            # Handles cases where the final value isn't a number (e.g., a string, list)
-            # print(f"Debug: Error converting value to float for {metric_path} in {model}. Value: {current_level}. Error: {e}")
             return default
         except Exception as e:
-             # Catch any other unexpected errors during access
-             # print(f"Debug: Unexpected error accessing {metric_path} for {model}: {e}")
              return default
-
 
     def _extract_data_for_plotting(self):
         """
@@ -194,6 +199,16 @@ class MetricsVisualizer:
         plot_data["Recall"] = []
         plot_data["F1-Score"] = []
         plot_data["Model"] = self.models # Store model names in order
+
+        # For debugging
+        print("DEBUG: Available keys in results for first model:")
+        if self.models:
+            first_model = self.models[0]
+            if first_model in self.results:
+                if 'coco_metrics' in self.results[first_model]:
+                    print(f"DEBUG: coco_metrics keys: {list(self.results[first_model]['coco_metrics'].keys())}")
+                else:
+                    print(f"DEBUG: No 'coco_metrics' in model data. Available keys: {list(self.results[first_model].keys())}")
 
         # --- Extract main metrics for each model ---
         for model in self.models:
@@ -492,38 +507,27 @@ class MetricsVisualizer:
         # Get original data
         orig_df = self.data['summary_df'][available_metrics].copy()
         
+        # --- Scaling logic remains the same ---
         # Create a boosted version of the data for better visualization
         df = pd.DataFrame(index=orig_df.index)
-        
-        # Check if all values are extremely small
         max_val = orig_df.max().max()
-        min_visible_value = 0.05  # Minimum height for bars to be clearly visible
-        
-        if max_val < 0.01:  # If all values are too small to see properly
-            # Calculate boost needed to make the largest value visible
-            if max_val > 1e-6:  # If we have some non-zero values
-                boost_factor = min_visible_value / max_val  # Make largest value = min_visible_value
-            else:
-                boost_factor = 1000  # Just use a large factor if all values are essentially zero
-                
-            # Apply different boost factors to each value to maintain relative proportions
-            # but make all values visible
+        min_visible_value = 0.05
+        if max_val < 0.01:
+            if max_val > 1e-6: boost_factor = min_visible_value / max_val
+            else: boost_factor = 1000
             for model in orig_df.index:
                 for metric in available_metrics:
                     orig_val = orig_df.loc[model, metric]
-                    if orig_val < 1e-6:  # Almost zero
-                        # Set a small minimum value to ensure bars are visible
-                        df.loc[model, metric] = min_visible_value * 0.2  # 20% of our minimum
+                    if orig_val < 1e-6: df.loc[model, metric] = min_visible_value * 0.2
                     else:
-                        # Scale proportionally but ensure value is at least 10% of minimum
                         boosted_val = orig_val * boost_factor
                         df.loc[model, metric] = max(boosted_val, min_visible_value * 0.1)
-                        
-            scaled = True  # Flag that we've scaled values
+            scaled = True
         else:
-            # Values are large enough to show directly
             df = orig_df.copy()
             scaled = False
+        # --- End Scaling Logic ---
+
 
         n_models = len(df)
         n_metrics = len(df.columns)
@@ -535,7 +539,6 @@ class MetricsVisualizer:
             'AP (IoU=0.50)': 'AP@0.50',
             'AP (IoU=0.75)': 'AP@0.75'
         }
-        # Colors based on target image legend
         metric_colors = {
             'mAP (IoU=0.50:0.95)': '#000080', # Navy
             'AP (IoU=0.50)': '#C71585',       # Medium Violet Red / Pink
@@ -548,44 +551,35 @@ class MetricsVisualizer:
             rects = ax.bar(index + i * bar_width, plot_data, bar_width,
                         label=legend_labels.get(metric, metric),
                         color=colors[i])
-            
+
             # Use original values in labels (not the boosted ones)
             orig_values = pd.to_numeric(orig_df[metric], errors='coerce').fillna(0)
-            
+
             # Custom label each bar with the original value
             for j, rect in enumerate(rects):
                 height = rect.get_height()
                 orig_val = orig_values.iloc[j]
-                
-                # Use more decimal places for very small values
-                if orig_val < 0.01:
-                    label = f'{orig_val:.4f}'  # Show 4 decimal places for small values
-                else:
-                    label = f'{orig_val:.3f}'
-                
+
+                # Force using 4 decimal places for all small AP values
+                if orig_val < 0.1: label = f'{orig_val:.4f}'
+                else: label = f'{orig_val:.3f}'
+
                 ax.annotate(label,
-                           xy=(rect.get_x() + rect.get_width() / 2, height),
-                           xytext=(0, 3),  # 3 points vertical offset
-                           textcoords="offset points",
-                           ha='center', va='bottom', fontsize=8)
+                          xy=(rect.get_x() + rect.get_width() / 2, height),
+                          xytext=(0, 3), textcoords="offset points",
+                          ha='center', va='bottom', fontsize=8)
 
         ax.set_ylabel('AP Value')
-        if scaled:
-            ax.set_title('Average Precision (AP) at Different IoU Thresholds\n(Values scaled for visibility)')
-        else:
-            ax.set_title('Average Precision (AP) at Different IoU Thresholds')
-            
+        if scaled: ax.set_title('Average Precision (AP) at Different IoU Thresholds\n(Values scaled for visibility)')
+        else: ax.set_title('Average Precision (AP) at Different IoU Thresholds')
+        
         ax.set_xticks(index + bar_width * (n_metrics - 1) / 2)
         ax.set_xticklabels(df.index, rotation=0, ha='center')
         ax.legend(title="AP Metric", fontsize='small')
         
-        # Dynamic y-axis 
         max_plotted = df.max().max()
-        if max_plotted <= 0:
-            upper_limit = 0.1  # default minimum scale when values are zero
-        else:
-            upper_limit = max_plotted * 1.2  # Add 20% headroom
-            
+        if max_plotted <= 0: upper_limit = 0.1
+        else: upper_limit = max_plotted * 1.2
         ax.set_ylim(0, upper_limit)
         ax.grid(axis='y', linestyle='--', alpha=0.6)
 
@@ -851,14 +845,14 @@ class MetricsVisualizer:
         df_table = self.data['summary_df'][original_col_order].copy()
         df_table.rename(columns=available_cols, inplace=True)
 
-        # --- Format Data ---
+        # --- Format Data (Simplified) ---
         for col in df_table.columns:
             if col == 'FPS':
                 df_table[col] = df_table[col].apply(lambda x: f"{x:.1f}" if pd.notna(x) else 'N/A')
             elif col in ['mAP', 'AP@50', 'AP@75', 'F1-Score', 'Small AP', 'Med AP', 'Large AP']:
-                 df_table[col] = df_table[col].apply(lambda x: f"{x:.3f}" if pd.notna(x) and abs(x) > 1e-9 else '0.000')
+                df_table[col] = df_table[col].apply(lambda x: f"{x:.4f}" if pd.notna(x) else 'N/A')
             else:
-                 df_table[col] = df_table[col].apply(lambda x: f"{x}" if pd.notna(x) else 'N/A')
+                df_table[col] = df_table[col].apply(lambda x: f"{x}" if pd.notna(x) else 'N/A')
 
         df_table.reset_index(inplace=True) # Makes 'Model' a column
 
