@@ -33,7 +33,7 @@ VISUALIZATIONS_DIR.mkdir(exist_ok=True, parents=True)
 MODEL_COLORS = {
     # Updated to match the red color used in target image's FPS/Radar/Scatter/Table
     'mask-rcnn': '#d62728', # Brick Red 
-    'yolo-seg': '#d62728',  # Brick Red (Using same color for consistency in model-specific plots)
+    'yolo-seg': '#1f77b4',  # Muted Blue (Changed from red)
     # Add future models here, e.g.:
     # 'MyNewModel': '#9467bd', # Muted Purple
     'Default': '#888888'    # Grey fallback for unlisted models
@@ -752,11 +752,34 @@ class MetricsVisualizer:
         ax.set_ylabel('F1-Score')
         ax.set_title('F1-Score vs. Speed Performance')
         ax.grid(True, linestyle='--', alpha=0.6)
-        # Add padding to limits
+        
+        # Improved axis limits that adapt to data
         max_fps = fps.max() if not fps.empty else 0
         max_f1 = f1_scores.max() if not f1_scores.empty else 0
-        ax.set_xlim(left=-0.5, right=max(5, max_fps * 1.1))
-        ax.set_ylim(bottom=-0.005, top=max(0.1, max_f1 * 1.15))
+        
+        # For x-axis (Speed/FPS)
+        if max_fps <= 0:
+            # If no valid FPS data, use a default range
+            ax.set_xlim(left=-0.5, right=5)
+        else:
+            # Add 10% padding to the right for better visualization
+            ax.set_xlim(left=-0.5, right=max_fps * 1.1)
+        
+        # For y-axis (F1-Score) - dynamic scaling based on max value
+        if max_f1 <= 0.001:  # Nearly zero values
+            # Use a small default range when values are essentially zero
+            ax.set_ylim(bottom=0, top=0.01)
+        elif max_f1 < 0.1:  # Small but non-zero values
+            # For small F1 values, add more relative padding (30%)
+            ax.set_ylim(bottom=0, top=max_f1 * 1.3)
+        else:
+            # For larger F1 values, add standard 15% padding
+            ax.set_ylim(bottom=0, top=max_f1 * 1.15)
+        
+        # Add a small offset from zero for better visibility
+        y_min, y_max = ax.get_ylim()
+        if y_min == 0:
+            ax.set_ylim(bottom=-0.001, top=y_max)
 
 
     def _plot_radar(self, ax):
@@ -786,26 +809,68 @@ class MetricsVisualizer:
         radar_cols_original = list(available_radar_metrics.values())
         radar_cols_display = list(available_radar_metrics.keys())
         df_radar_raw = self.data['summary_df'][radar_cols_original].copy()
+        
+        # Print debug info about raw values
+        print("\nDEBUG - Radar Chart Raw Values:")
+        print(df_radar_raw)
 
-        # --- Data Normalization ---
+        # --- Enhanced Data Normalization for Small Values ---
         df_radar_normalized = pd.DataFrame(index=df_radar_raw.index)
+        min_visible_value = 0.2  # Minimum value for visibility in the radar chart
+        
         for display_name, original_col in available_radar_metrics.items():
             column_data = df_radar_raw[original_col]
+            
+            # Handle different normalization strategies based on metric type
             if original_col == 'Speed (FPS)':
+                # For Speed metric - standard normalization by max value
                 max_val = column_data.max()
-                normalized = column_data / max_val if max_val > 0 else 0
-            else: # AP/F1 metrics
-                max_val = max(1.0, column_data.max()) # Use 1.0 as max reference
-                normalized = column_data / max_val if max_val > 0 else 0
+                if max_val > 0:
+                    normalized = column_data / max_val
+                else:
+                    # Set to small visible values if all are zero
+                    normalized = pd.Series([min_visible_value * 0.5] * len(column_data), index=column_data.index)
+            else:  
+                # For accuracy metrics (mAP, F1, AP by size)
+                max_val = column_data.max()
+                
+                # Check if we have extremely small values
+                if max_val < 0.01:
+                    # For very small values, boost more aggressively for visibility
+                    # Each model gets a relative boost while maintaining order
+                    relative_ranks = column_data.rank(method='min') / len(column_data)
+                    # Scale relative ranks to be between min_visible_value and 0.8
+                    normalized = min_visible_value + (0.6 * relative_ranks)
+                    
+                    # Add a note explaining the scaling
+                    print(f"Note: '{display_name}' values are very small (<0.01), using rank-based scaling for visibility")
+                else:
+                    # For larger values, use standard normalization but ensure minimum visibility
+                    normalized = column_data / max(1.0, max_val)  # Cap reference at 1.0
+                    # Boost any non-zero but small values to be at least somewhat visible
+                    for i, val in enumerate(normalized):
+                        if 0 < val < min_visible_value * 0.5:
+                            normalized.iloc[i] = min_visible_value * 0.5
+            
             df_radar_normalized[display_name] = normalized
-
+            
+        # Handle any NaN values
         df_radar = df_radar_normalized.fillna(0)
+        
+        # Print debug info about normalized values
+        print("\nDEBUG - Radar Chart Normalized Values:")
+        print(df_radar)
 
         # --- Plotting Setup ---
         categories = list(df_radar.columns)
         n_categories = len(categories)
         angles = np.linspace(0, 2 * np.pi, n_categories, endpoint=False).tolist()
         angles += angles[:1] # Close loop
+
+        # Create a background reference circle for comparison
+        ax.plot(angles, [0.5] * (n_categories + 1), color='gray', linestyle='--', 
+                linewidth=0.5, alpha=0.3, label=None)
+        ax.fill(angles, [0.5] * (n_categories + 1), color='lightgray', alpha=0.1)
 
         ax.set_xticks(angles[:-1])
         ax.set_xticklabels(categories, fontsize=9, color='grey')
@@ -819,12 +884,22 @@ class MetricsVisualizer:
         # --- Plot each model's data ---
         for i, model in enumerate(df_radar.index):
             data = df_radar.loc[model].tolist()
-            data += data[:1]
+            data += data[:1]  # Close the loop
             color = get_model_color(model)
+            
+            # Plot the lines with improved visibility
             ax.plot(angles, data, linewidth=2, linestyle='solid', label=model, color=color, zorder=i+2)
+            
+            # Fill with semi-transparent color
             ax.fill(angles, data, color=color, alpha=0.25, zorder=i+1)
 
-        ax.set_title('Multi-dimensional Performance Comparison', size=12, y=1.12)
+        # Add scale indication if we used boosted values for very small metrics
+        has_boosted = any(df_radar_raw.max() < 0.01)
+        title = 'Multi-dimensional Performance Comparison'
+        if has_boosted:
+            title += '\n(Small values boosted for visibility)'
+            
+        ax.set_title(title, size=12, y=1.12)
         ax.legend(loc='lower right', bbox_to_anchor=(1.15, -0.1), fontsize='small')
 
 

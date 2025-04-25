@@ -6,7 +6,8 @@ This script lets you regenerate the dashboard visualization without running a ne
 
 import argparse
 from pathlib import Path
-from src.metrics_visualizer import MetricsVisualizer, RESULTS_DIR
+# Fix the import - import directly from metrics_visualizer in the same directory
+from metrics_visualizer import MetricsVisualizer, RESULTS_DIR
 
 def main():
     """Generate a metrics dashboard from existing results"""
