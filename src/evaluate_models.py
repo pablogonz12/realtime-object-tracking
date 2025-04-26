@@ -31,7 +31,11 @@ from pycocotools.cocoeval import COCOeval
 from pycocotools import mask as maskUtils
 
 # Import model manager
-from src.models import ModelManager, DEFAULT_MODEL_PATHS
+try:
+    from src.models import ModelManager, DEFAULT_MODEL_PATHS
+except ImportError:
+    # If running directly from the src directory
+    from models import ModelManager, DEFAULT_MODEL_PATHS
 
 # Configure paths
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -708,10 +712,15 @@ def main():
     print("Evaluation complete!")
 
     # Always generate the metrics dashboard after evaluation
-    print("\\nGenerating metrics dashboard...")
+    print("\nGenerating metrics dashboard...")
     try:
-        # Ensure MetricsVisualizer is imported
-        from src.metrics_visualizer import MetricsVisualizer
+        # Try relative import first (when running as a module)
+        try:
+            from metrics_visualizer import MetricsVisualizer
+        except ImportError:
+            # Fall back to src-prefixed import (when running from project root)
+            from src.metrics_visualizer import MetricsVisualizer
+            
         visualizer = MetricsVisualizer()  # Will automatically use latest results file
 
         # Create the dashboard

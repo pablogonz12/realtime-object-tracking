@@ -121,32 +121,27 @@ def process_video_with_model(
                 if results and len(results) == 3:
                     detections, segmentations, annotated_frame = results
                     
+                    # Calculate FPS for the standardized layout
+                    elapsed = time.time() - start_time
+                    current_fps = frame_count / elapsed if elapsed > 0 else 0
+                    
+                    # Apply standardized layout to the annotated frame with FPS info
+                    annotated_frame = apply_standardized_layout(
+                        frame=annotated_frame,
+                        detections=detections,
+                        model_type=model_manager.model_type,
+                        frame_count=frame_count,
+                        total_frames=total_frames,
+                        width=width,
+                        height=height,
+                        fps=current_fps if add_fps else None  # Pass FPS to the layout function
+                    )
+                    
                     # Count detections by class for statistics
                     for det in detections:
                         class_name = det.get('class_name', 'unknown')
                         stats["detections"][class_name] = stats["detections"].get(class_name, 0) + 1
                     
-                    # Add overlay with more information if it's not already there
-                    if add_fps:
-                        # Add semi-transparent overlay at the top
-                        overlay = annotated_frame.copy()
-                        cv2.rectangle(overlay, (0, 0), (width, 40), (0, 0, 0), -1)
-                        cv2.addWeighted(overlay, 0.5, annotated_frame, 0.5, 0, annotated_frame)
-                        
-                        # Add model info and frame count
-                        elapsed = time.time() - start_time
-                        if elapsed > 0:
-                            current_fps = frame_count / elapsed
-                        else:
-                            current_fps = 0
-                        
-                        info_text = f"Model: {model_manager.model_type.upper()} | "
-                        info_text += f"FPS: {current_fps:.1f} | "
-                        info_text += f"Frame: {frame_count}/{total_frames}"
-                        
-                        cv2.putText(annotated_frame, info_text, (10, 30),
-                                   cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
-                
                     # Write to output video if enabled
                     if out:
                         out.write(annotated_frame)
@@ -202,7 +197,6 @@ def process_video_with_model(
         # Clean up resources
         cap.release()
         if out:
-            out.write
             out.release()
             
         # Provide final statistics
@@ -210,6 +204,83 @@ def process_video_with_model(
             stats_callback(stats)
             
         return stats
+
+
+def apply_standardized_layout(frame, detections, model_type, frame_count, total_frames, width, height, fps=None):
+    """
+    Apply a standardized layout to all frames regardless of model type
+    
+    Args:
+        frame (np.ndarray): The frame to apply layout to
+        detections (list): List of detection dictionaries
+        model_type (str): Type of model being used
+        frame_count (int): Current frame number
+        total_frames (int): Total number of frames
+        width (int): Frame width
+        height (int): Frame height
+        fps (float, optional): Frames per second to display, if None, FPS is not added
+        
+    Returns:
+        np.ndarray: Frame with standardized layout applied
+    """
+    # Create a copy to work with
+    result_frame = frame.copy()
+    
+    # 1. Add a consistent header bar
+    header_height = 40
+    cv2.rectangle(result_frame, (0, 0), (width, header_height), (0, 0, 0), -1)
+    
+    # Header text
+    header_text = f"{model_type.upper()} | Frame: {frame_count}/{total_frames}"
+    if fps is not None:
+        header_text += f" | FPS: {fps:.1f}"
+    
+    cv2.putText(result_frame, header_text, (10, 30), 
+                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+    
+    # 2. Add consistent detection count display
+    if detections:
+        det_count = len(detections)
+        class_counts = {}
+        for det in detections:
+            class_name = det.get('class_name', 'unknown')
+            class_counts[class_name] = class_counts.get(class_name, 0) + 1
+        
+        # List top classes with counts
+        y_pos = header_height + 30
+        cv2.putText(result_frame, f"Detections: {det_count}", 
+                    (10, y_pos), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
+        
+        for i, (cls, count) in enumerate(sorted(class_counts.items(), key=lambda x: x[1], reverse=True)[:5]):
+            y_pos += 25
+            cv2.putText(result_frame, f"{cls}: {count}", 
+                        (10, y_pos), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
+    else:
+        cv2.putText(result_frame, "No detections", 
+                    (10, header_height + 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
+    
+    # 3. Ensure all bounding boxes are visible and properly labeled
+    for det in detections:
+        class_name = det.get('class_name', 'unknown')
+        confidence = det.get('confidence', 0.0)
+        bbox = det.get('bbox')
+        
+        if bbox and len(bbox) == 4:
+            x1, y1, x2, y2 = [int(b) for b in bbox]
+            
+            # Draw consistent box styles
+            cv2.rectangle(result_frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
+            
+            # Draw background for text
+            text = f"{class_name} {confidence:.2f}"
+            text_size = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 2)[0]
+            cv2.rectangle(result_frame, (x1, y1 - 20), (x1 + text_size[0] + 10, y1), (0, 255, 0), -1)
+            
+            # Draw text
+            cv2.putText(result_frame, text, (x1 + 5, y1 - 5), 
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 2)
+    
+    return result_frame
 
 
 def process_webcam_with_model(
@@ -325,6 +396,22 @@ def process_webcam_with_model(
                 if results and len(results) == 3:
                     detections, segmentations, annotated_frame = results
                     
+                    # Calculate FPS for display
+                    elapsed = time.time() - start_time
+                    current_fps = frame_count / elapsed if elapsed > 0 else 0
+                    
+                    # Apply standardized layout to the annotated frame
+                    annotated_frame = apply_standardized_layout(
+                        frame=annotated_frame,
+                        detections=detections,
+                        model_type=model_manager.model_type,
+                        frame_count=frame_count,
+                        total_frames=total_frames,
+                        width=process_width,
+                        height=process_height,
+                        fps=current_fps  # Pass FPS to the layout function
+                    )
+                    
                     # Count detections by class for statistics
                     for det in detections:
                         class_name = det.get('class_name', 'Unknown')
@@ -333,22 +420,6 @@ def process_webcam_with_model(
                     
                     # Limit display update rate
                     if (current_time - last_update_time) >= frame_interval_ms:
-                        # Add overlay with more information
-                        overlay = annotated_frame.copy()
-                        cv2.rectangle(overlay, (0, 0), (process_width, 40), (0, 0, 0), -1)
-                        cv2.addWeighted(overlay, 0.5, annotated_frame, 0.5, 0, annotated_frame)
-                        
-                        # Add model info and stats
-                        elapsed = time.time() - start_time
-                        current_fps = frame_count / elapsed if elapsed > 0 else 0
-                        
-                        info_text = f"Model: {model_manager.model_type.upper()} | "
-                        info_text += f"FPS: {current_fps:.1f} | "
-                        info_text += f"Frame: {frame_count}"
-                        
-                        cv2.putText(annotated_frame, info_text, (10, 30),
-                                   cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
-                        
                         # Update via callback
                         if callback:
                             callback(annotated_frame, frame_count, total_frames, model_manager.model_type)

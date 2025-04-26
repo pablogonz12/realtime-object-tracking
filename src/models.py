@@ -39,8 +39,9 @@ CONFIGS_DIR.mkdir(parents=True, exist_ok=True)
 
 # Default paths to model weights/configs
 DEFAULT_MODEL_PATHS = {
-    # Temporarily disabled for YOLO-only comparisons, but keep it here for reference
-    'mask-rcnn': 'maskrcnn_resnet50_fpn_coco', # Will be re-enabled when needed
+    # Mask-RCNN model commented out - only using YOLO models now
+    # 'mask-rcnn': 'maskrcnn_resnet50_fpn_coco', # Will be re-enabled when needed
+    
     # YOLOv8
     'yolo8n-seg': MODELS_DIR / 'yolov8n-seg.pt',
     'yolo8s-seg': MODELS_DIR / 'yolov8s-seg.pt',
@@ -594,15 +595,24 @@ class ModelManager:
         """Initialize the appropriate model based on type"""
         print(f"Initializing model manager for type: {self.model_type}")
         try:
+            # Commenting out Mask R-CNN for now since we're only using YOLO models
+            # Keep the code for future usability
             if self.model_type == 'mask-rcnn':
-                return MaskRCNNWrapper()
-            # Check if it's any YOLO-based model (now includes all variants)
-            elif self.model_type in DEFAULT_MODEL_PATHS and self.model_type != 'mask-rcnn':
-                # All YOLO variants use the same YOLOWrapper
+                # Comment out the Mask R-CNN initialization
+                print("Mask R-CNN model is currently disabled. Using YOLO models only.")
+                return None
+                # Return MaskRCNNWrapper() # This line is commented out - re-enable when needed
+                
+            # More flexible handling of YOLO model types
+            elif 'yolo' in self.model_type.lower():
+                # Handle all YOLO segmentation variants regardless of naming convention
+                print(f"Loading YOLO model from: {self.model_path}")
                 return YOLOWrapper(self.model_path)
+                
             else:
                 print(f"Error: Unsupported model type: {self.model_type}")
                 return None
+                
         except Exception as e:
              print(f"Error during model wrapper initialization for {self.model_type}: {e}")
              import traceback

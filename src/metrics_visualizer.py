@@ -571,7 +571,8 @@ class MetricsVisualizer:
 
                 ax.annotate(label,
                           xy=(rect.get_x() + rect.get_width() / 2, height),
-                          xytext=(0, 3), textcoords="offset points",
+                          xytext=(0, 3),  # 3 points vertical offset
+                          textcoords="offset points",
                           ha='center', va='bottom', fontsize=8)
 
         ax.set_ylabel('AP Value')
@@ -590,49 +591,191 @@ class MetricsVisualizer:
 
 
     def _plot_ap_size(self, ax):
-        """Plots AP performance by object size."""
-        metrics_to_plot = ['Small Objects AP', 'Medium Objects AP', 'Large Objects AP']
-        available_metrics = [m for m in metrics_to_plot if m in self.data['summary_df'].columns]
-        if not available_metrics:
-             ax.text(0.5, 0.5, 'AP by Size data not available.', ha='center', va='center', transform=ax.transAxes)
-             ax.set_title('Performance by Object Size (AP)')
-             return
-
-        df = self.data['summary_df'][available_metrics]
-        n_models = len(df)
-        n_metrics = len(df.columns)
-        bar_width = 0.25
-        index = np.arange(n_models)
-
-        legend_labels = {
-            'Small Objects AP': 'Small AP',
-            'Medium Objects AP': 'Medium AP',
-            'Large Objects AP': 'Large AP'
-        }
-        # Colors based on target image legend
-        metric_colors = {
-             'Small Objects AP': '#001f3f',  # Dark Navy / Near Black
-             'Medium Objects AP': '#808080', # Grey
-             'Large Objects AP': '#FFFF00'   # Yellow
-        }
-        colors = [metric_colors.get(metric, plt.cm.cividis(i/n_metrics)) for i, metric in enumerate(df.columns)]
-
-        all_rects = []
-        for i, metric in enumerate(df.columns):
-             rects = ax.bar(index + i * bar_width, df[metric], bar_width,
-                           label=legend_labels.get(metric, metric),
-                           color=colors[i])
-             self._add_value_labels(ax, rects, precision=3)
-             all_rects.append(rects)
-
-        ax.set_ylabel('AP Value')
-        ax.set_title('Performance by Object Size (AP)')
-        ax.set_xticks(index + bar_width * (n_metrics - 1) / 2)
-        ax.set_xticklabels(df.index, rotation=0, ha='center')
-        ax.legend(title="Object Size", fontsize='small')
-        max_val = df.max().max() if not df.empty else 0
-        ax.set_ylim(0, max(0.01, max_val * 1.2) if max_val > 0 else 0.01)
-        ax.grid(axis='y', linestyle='--', alpha=0.6)
+        """Plots Shape Analysis metrics for segmentation models."""
+        # Check if shape analysis metrics are available in results
+        has_shape_data = False
+        shape_analysis_metrics = {}
+        
+        # First try to find direct shape metrics in the results
+        for model in self.models:
+            # Check if model has shape_metrics in the results data
+            if model in self.results and 'shape_metrics' in self.results[model]:
+                has_shape_data = True
+                shape_metrics = self.results[model]['shape_metrics']
+                
+                # Extract key shape metrics if they exist
+                if isinstance(shape_metrics, dict):
+                    shape_analysis_metrics[model] = {
+                        'Compactness': shape_metrics.get('mean_compactness', 0.0),
+                        'Convexity': shape_metrics.get('mean_convexity', 0.0),
+                        'Circularity': shape_metrics.get('mean_circularity', 0.0),
+                    }
+        
+        # If we have shape metrics, create a specialized bar chart
+        if has_shape_data:
+            model_names = list(shape_analysis_metrics.keys())
+            shape_metrics = ['Compactness', 'Convexity', 'Circularity']
+            
+            # Prepare data for plotting
+            data = {metric: [] for metric in shape_metrics}
+            for model in model_names:
+                for metric in shape_metrics:
+                    # Get value or default to 0
+                    value = shape_analysis_metrics[model].get(metric, 0.0)
+                    data[metric].append(value)
+                    
+            # Set up plot
+            n_models = len(model_names)
+            n_metrics = len(shape_metrics)
+            bar_width = 0.25
+            index = np.arange(n_models)
+            
+            # Use distinct colors for each metric
+            metric_colors = {
+                'Compactness': '#8B4513',  # Brown
+                'Convexity': '#4B0082',    # Indigo
+                'Circularity': '#006400'   # Dark Green
+            }
+            
+            colors = [metric_colors.get(metric, plt.cm.tab10(i/n_metrics)) for i, metric in enumerate(shape_metrics)]
+            
+            # Create bars for each metric
+            for i, metric in enumerate(shape_metrics):
+                values = data[metric]
+                rects = ax.bar(index + i * bar_width, values, bar_width,
+                             label=metric, color=colors[i])
+                
+                # Add data labels on bars
+                for j, rect in enumerate(rects):
+                    height = rect.get_height()
+                    # Format based on value range (shape metrics typically 0-1)
+                    if height < 0.01:
+                        label_text = f'{height:.4f}'
+                    else:
+                        label_text = f'{height:.3f}'
+                        
+                    ax.annotate(label_text,
+                              xy=(rect.get_x() + rect.get_width() / 2, height),
+                              xytext=(0, 3),  # 3 points vertical offset
+                              textcoords="offset points",
+                              ha='center', va='bottom', fontsize=8)
+                    
+            # Configure axes
+            ax.set_ylabel('Shape Metric Value (0-1)')
+            ax.set_title('Shape Analysis (Segmentation Quality)')
+            ax.set_xticks(index + bar_width * (n_metrics - 1) / 2)
+            ax.set_xticklabels(model_names, rotation=0, ha='center')
+            ax.legend(title="Shape Metrics", fontsize='small')
+            
+            # Set y-limits for shape metrics (typically 0-1)
+            ax.set_ylim(0, 1.05)
+            ax.grid(axis='y', linestyle='--', alpha=0.6)
+            
+            # Add explanatory text about shape metrics
+            explanation = (
+                "Compactness: How efficiently a boundary encloses area\n"
+                "Convexity: Ratio of perimeter of convex hull to actual perimeter\n"
+                "Circularity: How closely shape resembles a circle"
+            )
+            
+            # Add explanatory text in a box at the bottom
+            props = dict(boxstyle='round', facecolor='wheat', alpha=0.2)
+            ax.text(0.5, -0.20, explanation, transform=ax.transAxes,
+                  fontsize=8, ha='center', va='center', bbox=props)
+            return
+        
+        # Check if segmentation metrics are available as fallback
+        segm_metrics_to_try = ['Segm_mAP (IoU=0.50:0.95)', 'Segm_AP (IoU=0.50)']
+        available_segm_metrics = [m for m in segm_metrics_to_try if m in self.data['summary_df'].columns]
+        
+        if available_segm_metrics:
+            # Create a fallback message explaining we're showing segmentation AP instead of shape metrics
+            ax.text(0.5, 0.9, "Shape analysis metrics not available.\nShowing segmentation AP metrics instead.", 
+                   ha='center', va='center', transform=ax.transAxes, 
+                   fontsize=9, color='gray', bbox=dict(facecolor='white', alpha=0.8))
+                    
+            # Create a basic bar chart using available segmentation metrics
+            df = self.data['summary_df'][available_segm_metrics]
+            n_models = len(df)
+            n_metrics = len(df.columns)
+            bar_width = 0.25
+            index = np.arange(n_models)
+            
+            legend_labels = {
+                'Segm_mAP (IoU=0.50:0.95)': 'Segm mAP (0.50:0.95)', 
+                'Segm_AP (IoU=0.50)': 'Segm AP@0.50'
+            }
+            
+            colors = plt.cm.viridis(np.linspace(0.2, 0.8, n_metrics))
+            
+            for i, metric in enumerate(df.columns):
+                rects = ax.bar(index + i * bar_width, df[metric], bar_width,
+                              label=legend_labels.get(metric, metric),
+                              color=colors[i])
+                self._add_value_labels(ax, rects, precision=4)
+                
+            ax.set_ylabel('Segmentation AP Value')
+            ax.set_title('Shape Analysis (Segmentation Performance)')
+            ax.set_xticks(index + bar_width * (n_metrics - 1) / 2)
+            ax.set_xticklabels(df.index, rotation=0, ha='center')
+            ax.legend(title="Segm. Metric", fontsize='small')
+            
+            # Set appropriate y-limits
+            max_val = df.max().max() if not df.empty else 0
+            ax.set_ylim(0, max(0.01, max_val * 1.2))
+            ax.grid(axis='y', linestyle='--', alpha=0.6)
+            return
+                
+        # If no shape metrics or segmentation metrics are available, use object size metrics as last resort
+        size_metrics_to_try = ['Small Objects AP', 'Medium Objects AP', 'Large Objects AP']
+        available_size_metrics = [m for m in size_metrics_to_try if m in self.data['summary_df'].columns]
+        
+        if available_size_metrics:
+            ax.text(0.5, 0.9, "Shape analysis metrics not available.\nShowing performance by object size instead.", 
+                   ha='center', va='center', transform=ax.transAxes, 
+                   fontsize=9, color='gray', bbox=dict(facecolor='white', alpha=0.8))
+                   
+            df = self.data['summary_df'][available_size_metrics]
+            n_models = len(df)
+            n_metrics = len(df.columns)
+            bar_width = 0.25
+            index = np.arange(n_models)
+            
+            legend_labels = {
+                'Small Objects AP': 'Small',
+                'Medium Objects AP': 'Medium',
+                'Large Objects AP': 'Large'
+            }
+            
+            # Use a distinct color scheme for object size metrics
+            metric_colors = {
+                'Small Objects AP': '#ff9896',  # Light red
+                'Medium Objects AP': '#aec7e8', # Light blue
+                'Large Objects AP': '#98df8a'   # Light green
+            }
+            colors = [metric_colors.get(metric, plt.cm.tab10(i/n_metrics)) for i, metric in enumerate(df.columns)]
+            
+            for i, metric in enumerate(df.columns):
+                rects = ax.bar(index + i * bar_width, df[metric], bar_width,
+                              label=legend_labels.get(metric, metric),
+                              color=colors[i])
+                self._add_value_labels(ax, rects, precision=4)
+                
+            ax.set_ylabel('AP Value')
+            ax.set_title('Shape Analysis (by Object Size)')
+            ax.set_xticks(index + bar_width * (n_metrics - 1) / 2)
+            ax.set_xticklabels(df.index, rotation=0, ha='center')
+            ax.legend(title="Object Size", fontsize='small')
+            
+            max_val = df.max().max() if not df.empty else 0
+            ax.set_ylim(0, max(0.01, max_val * 1.2))
+            ax.grid(axis='y', linestyle='--', alpha=0.6)
+            return
+            
+        # Last resort - no metrics available
+        ax.text(0.5, 0.5, 'Shape analysis metrics not available.\nNo segmentation or object size data found.',
+               ha='center', va='center', transform=ax.transAxes)
+        ax.set_title('Shape Analysis')
 
 
     def _plot_fps(self, ax):
@@ -1117,7 +1260,7 @@ class MetricsVisualizer:
             ax.text(0.5, 0.5, 'No data available for summary table.',
                    ha='center', va='center', transform=ax.transAxes)
             return
-            
+        
         # Select key metrics for the table - order matters for display
         metrics_to_include = [
             'mAP (IoU=0.50:0.95)', # Overall mAP 

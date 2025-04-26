@@ -33,8 +33,24 @@ from src.models import ModelManager # Removed unused YOLOWrapper, RTDETRWrapper,
 
 # Default model paths for auto-download
 DEFAULT_MODELS = {
-    'mask-rcnn': 'models/pts/maskrcnn_resnet50_fpn.pt',
-    'yolo-seg': 'models/pts/yolov8n-seg.pt'
+    'yolov8n-seg': 'models/pts/yolov8n-seg.pt',
+    'yolov8s-seg': 'models/pts/yolov8s-seg.pt',
+    'yolov8m-seg': 'models/pts/yolov8m-seg.pt',
+    'yolov8l-seg': 'models/pts/yolov8l-seg.pt',
+    'yolov8x-seg': 'models/pts/yolov8x-seg.pt',
+    'yolo11n-seg': 'models/pts/yolo11n-seg.pt',
+    'yolo11s-seg': 'models/pts/yolo11s-seg.pt',
+    'yolo11m-seg': 'models/pts/yolo11m-seg.pt',
+    'yolo11l-seg': 'models/pts/yolo11l-seg.pt',
+    'yolo11x-seg': 'models/pts/yolo11x-seg.pt',
+    'yoloe-11s-seg': 'models/pts/yoloe-11s-seg.pt',
+    'yoloe-11m-seg': 'models/pts/yoloe-11m-seg.pt',
+    'yoloe-11l-seg': 'models/pts/yoloe-11l-seg.pt',
+    'yoloe-v8s-seg': 'models/pts/yoloe-v8s-seg.pt',
+    'yoloe-v8m-seg': 'models/pts/yoloe-v8m-seg.pt',
+    'yoloe-v8l-seg': 'models/pts/yoloe-v8l-seg.pt',
+    'yolov9c-seg': 'models/pts/yolov9c-seg.pt',
+    'yolov9e-seg': 'models/pts/yolov9e-seg.pt'
 }
 
 def display_video_with_model(video_path, model_manager):
@@ -474,7 +490,8 @@ class GraphicalGUI:
         dataset_menu.add_command(label="Compress Datasets", command=self.compress_datasets)
         dataset_menu.add_separator()
         dataset_menu.add_command(label="Delete All Datasets", command=self.delete_datasets_gui)
-        dataset_menu.add_command(label="Delete Generated Data", command=self.delete_generated_data) # Added this line
+        dataset_menu.add_command(label="Delete Generated Data", command=self.delete_generated_data)
+        dataset_menu.add_command(label="Delete Downloaded Models", command=self.delete_downloaded_models)
         menubar.add_cascade(label="Dataset", menu=dataset_menu)
 
         # Evaluation menu
@@ -1708,6 +1725,7 @@ class GraphicalGUI:
             canvas_width / 2, canvas_height - 35,
             text="Click progress bar to seek",
             fill="white", font=("Arial", 9),
+            justify=tk.CENTER,
             tags="video_controls"
         )
 
@@ -2901,7 +2919,6 @@ class GraphicalGUI:
         self.preview_canvas.create_text(
             canvas_width // 2, bar_y + bar_height + 20,
             text=f"{progress_percent:.1f}%",
-
             font=("Arial", 10),
             fill="white"
         )
@@ -2965,6 +2982,142 @@ class GraphicalGUI:
                 self.status_var.set("Ready") # Reset status bar
 
         threading.Thread(target=eval_task, daemon=True).start()
+
+    def delete_downloaded_models(self):
+        """Delete downloaded model files from the models/pts directory"""
+        confirm = messagebox.askyesno(
+            "Delete Downloaded Models", 
+            "Are you sure you want to delete all downloaded model files?\n\n"
+            "This will remove all model files from the models/pts directory.",
+            icon='warning'
+        )
+        
+        if not confirm:
+            return
+            
+        try:
+            # Create a progress dialog
+            progress_dialog = tk.Toplevel(self.root)
+            progress_dialog.title("Deleting Model Files")
+            progress_dialog.geometry("400x200")
+            progress_dialog.transient(self.root)  # Make dialog modal
+            progress_dialog.grab_set()  # Prevent interaction with main window
+            progress_dialog.resizable(False, False)
+            
+            # Center the dialog on the main window
+            x = self.root.winfo_x() + (self.root.winfo_width() // 2) - (400 // 2)
+            y = self.root.winfo_y() + (self.root.winfo_height() // 2) - (200 // 2)
+            progress_dialog.geometry(f"+{x}+{y}")
+            
+            # Configure the grid
+            progress_dialog.columnconfigure(0, weight=1)
+            progress_dialog.rowconfigure(2, weight=1)
+            
+            # Dialog header
+            header_label = ttk.Label(
+                progress_dialog, 
+                text="Deleting Model Files", 
+                font=("Arial", 14, "bold"),
+                padding=(0, 10, 0, 20)
+            )
+            header_label.grid(row=0, column=0, sticky="ew")
+            
+            # Status label
+            status_var = tk.StringVar(value="Initializing...")
+            status_label = ttk.Label(
+                progress_dialog, 
+                textvariable=status_var,
+                font=("Arial", 10),
+                padding=(0, 0, 0, 5)
+            )
+            status_label.grid(row=1, column=0, sticky="ew")
+            
+            # Progress indicator (indeterminate)
+            progress = ttk.Progressbar(
+                progress_dialog,
+                mode='indeterminate',
+                length=350
+            )
+            progress.grid(row=2, column=0, padx=25, pady=10, sticky="ew")
+            progress.start()
+            
+            def delete_thread():
+                try:
+                    models_dir = Path("models/pts")
+                    deleted_count = 0
+                    
+                    # Check if directory exists
+                    if models_dir.exists() and models_dir.is_dir():
+                        # Get all model files
+                        model_files = list(models_dir.glob("*.pt")) + list(models_dir.glob("*.pth")) + list(models_dir.glob("*.onnx"))
+                        
+                        if model_files:
+                            # Update status
+                            self.root.after(0, lambda: status_var.set(f"Found {len(model_files)} model files to delete..."))
+                            
+                            # Delete each file
+                            for file in model_files:
+                                try:
+                                    os.remove(file)
+                                    deleted_count += 1
+                                    self.root.after(0, lambda c=deleted_count, t=len(model_files): status_var.set(f"Deleted {c}/{t} files..."))
+                                except Exception as e:
+                                    print(f"Error deleting {file}: {e}")
+                        else:
+                            self.root.after(0, lambda: status_var.set("No model files found to delete."))
+                    else:
+                        self.root.after(0, lambda: status_var.set("Models directory not found."))
+                    
+                    # Show completion
+                    self.root.after(0, lambda d=deleted_count: _show_completion(d))
+                    
+                except Exception as e:
+                    # Show error
+                    error_message = f"Error: {str(e)}"
+                    self.root.after(0, lambda: _show_error(error_message))
+            
+            def _show_completion(deleted_count):
+                # Update status
+                message = f"Successfully deleted {deleted_count} model files."
+                status_var.set(message)
+                self.status_var.set(message)
+                
+                # Stop and hide progress bar
+                progress.stop()
+                progress.grid_remove()
+                
+                # Enable dialog closing
+                progress_dialog.protocol("WM_DELETE_WINDOW", progress_dialog.destroy)
+                
+                # Add a close button
+                close_button = ttk.Button(progress_dialog, text="Close", command=progress_dialog.destroy)
+                close_button.grid(row=3, column=0, pady=(0, 15))
+            
+            def _show_error(error_message):
+                # Update status
+                status_var.set(f"Error: {error_message}")
+                self.status_var.set(f"Error deleting model files: {error_message}")
+                
+                # Stop and hide progress bar
+                progress.stop()
+                progress.grid_remove()
+                
+                # Enable dialog closing
+                progress_dialog.protocol("WM_DELETE_WINDOW", progress_dialog.destroy)
+                
+                # Add a close button
+                close_button = ttk.Button(progress_dialog, text="Close", command=progress_dialog.destroy)
+                close_button.grid(row=3, column=0, pady=(0, 15))
+            
+            # Start the deletion thread
+            threading.Thread(target=delete_thread, daemon=True).start()
+            
+        except Exception as e:
+            messagebox.showerror(
+                "Error",
+                f"An error occurred while setting up model deletion:\n{str(e)}"
+            )
+            self.status_var.set(f"Error deleting model files: {str(e)}")
 
 def main():
     """
