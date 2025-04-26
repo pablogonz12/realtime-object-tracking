@@ -43,8 +43,7 @@ RESULTS_DIR.mkdir(exist_ok=True, parents=True)
 # Configure models for evaluation
 MODELS_TO_EVALUATE = [
     {"type": "mask-rcnn", "path": DEFAULT_MODEL_PATHS['mask-rcnn'], "config": None},
-    {"type": "yolo-seg", "path": DEFAULT_MODEL_PATHS['yolo-seg'], "config": None},
-    {"type": "detr-panoptic", "path": DEFAULT_MODEL_PATHS['detr-panoptic'], "config": None}
+    {"type": "yolo-seg", "path": DEFAULT_MODEL_PATHS['yolo-seg'], "config": None}
 ]
 
 # COCO val2017 has 5000 images total
@@ -613,7 +612,7 @@ def main():
                         help=f"Number of COCO val2017 images to use (max {COCO_VAL_TOTAL_IMAGES}, default: 50)")
     parser.add_argument("--no-vis", action="store_true",
                         help="Skip saving individual detection visualizations (dashboard will still be generated)")
-    parser.add_argument("--models", type=str, nargs="+", choices=["mask-rcnn", "yolo-seg", "detr-panoptic"],
+    parser.add_argument("--models", type=str, nargs="+", choices=["mask-rcnn", "yolo-seg"],
                         help="Specific models to evaluate (default: all)")
     args = parser.parse_args()
 
