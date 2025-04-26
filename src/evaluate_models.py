@@ -41,10 +41,14 @@ RESULTS_DIR = PROJECT_ROOT / "inference" / "results"
 RESULTS_DIR.mkdir(exist_ok=True, parents=True)
 
 # Configure models for evaluation
+# Dynamically build the list from DEFAULT_MODEL_PATHS
 MODELS_TO_EVALUATE = [
-    {"type": "mask-rcnn", "path": DEFAULT_MODEL_PATHS['mask-rcnn'], "config": None},
-    {"type": "yolo-seg", "path": DEFAULT_MODEL_PATHS['yolo-seg'], "config": None}
+    {"type": "mask-rcnn", "path": DEFAULT_MODEL_PATHS['mask-rcnn'], "config": None}
 ]
+# Add all YOLO-based models
+for model_key, model_path in DEFAULT_MODEL_PATHS.items():
+    if model_key != 'mask-rcnn':  # Skip mask-rcnn as it's already added
+        MODELS_TO_EVALUATE.append({"type": model_key, "path": model_path, "config": None})
 
 # COCO val2017 has 5000 images total
 COCO_VAL_TOTAL_IMAGES = 5000
@@ -259,7 +263,7 @@ class ModelEvaluator:
                     class_id = det.get("class_id")
 
                     # --- DEBUGGING START ---
-                    # if model_type == "yolo-seg" and idx < 3 and det_idx < 5:
+                    # if model_type == "yolo8-seg" and idx < 3 and det_idx < 5: # Updated model type
                     #     pass # Or remove the block entirely
                     # --- DEBUGGING END ---
 
@@ -283,14 +287,17 @@ class ModelEvaluator:
                         }
                         
                         # --- DEBUGGING START ---
-                        if model_type == "yolo-seg" and idx < 3 and det_idx < 5:
-                            print(f"DEBUG ({model_type}, img_id={image_id}, det_idx={det_idx}): COCO_pred={pred}")
+                        # Updated check to include all yolo8-seg variants
+                        if model_type.startswith("yolo8") and model_type.endswith("-seg") and len(coco_bbox_predictions) > 0:
+                            print(f"DEBUG ({model_type}): First few formatted bbox preds: {coco_bbox_predictions[:5]}")
                         # --- DEBUGGING END ---
                         
                         coco_bbox_predictions.append(pred)
                 
-                # If segmentation masks are available (for YOLO-Seg), add them to COCO predictions
-                if segmentations and model_type == "yolo-seg":
+                # If segmentation masks are available (for YOLO models), add them to COCO predictions
+                # Updated check to handle all YOLO variants with segmentation
+                is_yolo_seg_model = model_type != 'mask-rcnn' and (model_type.endswith('-seg') or model_type.endswith('-seg-pf'))
+                if segmentations and is_yolo_seg_model:
                     for i, mask in enumerate(segmentations):
                         if i < len(detections) and mask is not None:  # Make sure we have a detection to pair with
                             det = detections[i]
@@ -357,7 +364,8 @@ class ModelEvaluator:
                     print(f"Running COCO bbox evaluation for {model_type} with {len(coco_bbox_predictions)} predictions")
                     
                     # --- DEBUGGING START ---
-                    if model_type == "yolo-seg" and len(coco_bbox_predictions) > 0:
+                    # Updated check to include all yolo8-seg variants
+                    if model_type.startswith("yolo8") and model_type.endswith("-seg") and len(coco_bbox_predictions) > 0:
                         print(f"DEBUG ({model_type}): First few formatted bbox preds: {coco_bbox_predictions[:5]}")
                     # --- DEBUGGING END ---
 
@@ -396,8 +404,9 @@ class ModelEvaluator:
                     # Clean up the temporary file
                     os.unlink(dt_bbox_file)
                 
-                # Evaluate segmentation predictions (only for yolo-seg)
-                if model_type == "yolo-seg" and coco_segm_predictions:
+                # Evaluate segmentation predictions (only for yolo models)
+                # Updated check for all yolo segmentation models
+                if is_yolo_seg_model and coco_segm_predictions:
                     print(f"Running COCO segmentation evaluation for {model_type} with {len(coco_segm_predictions)} predictions")
                     
                     # --- DEBUGGING START ---
@@ -473,7 +482,7 @@ class ModelEvaluator:
         # print(f"DEBUG ({model_type}): Final detection_counts_per_image (first 10): {metrics.get('detection_counts_per_image', 'MISSING')[:10]}")
         # print(f"DEBUG ({model_type}): Length of detection_counts_per_image: {len(metrics.get('detection_counts_per_image', []))}")
         # --- DEBUGGING END ---
-        
+
         return metrics
     
     def run_reliability_test(self, max_images=20, num_runs=3):
@@ -612,10 +621,14 @@ def main():
                         help=f"Number of COCO val2017 images to use (max {COCO_VAL_TOTAL_IMAGES}, default: 50)")
     parser.add_argument("--no-vis", action="store_true",
                         help="Skip saving individual detection visualizations (dashboard will still be generated)")
-    parser.add_argument("--models", type=str, nargs="+", choices=["mask-rcnn", "yolo-seg"],
+    
+    # Dynamically generate model choices from DEFAULT_MODEL_PATHS
+    model_choices = list(DEFAULT_MODEL_PATHS.keys())
+    parser.add_argument("--models", type=str, nargs="+", choices=model_choices,
                         help="Specific models to evaluate (default: all)")
+    
     args = parser.parse_args()
-
+    
     # Validate args
     max_images = min(max(1, args.images), COCO_VAL_TOTAL_IMAGES)
     if max_images != args.images:
