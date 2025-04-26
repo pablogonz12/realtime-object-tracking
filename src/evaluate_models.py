@@ -204,9 +204,19 @@ class ModelEvaluator:
             "total_detections": 0,
             "inference_times": [],
             "detection_counts": {}, # Counts per class
-            "detection_counts_per_image": [], # <<< ADDED: Counts per image
+            "detection_counts_per_image": [], # Counts per image
             "classes_detected": set(),
-            "failures": 0
+            "failures": 0,
+            "shape_metrics": {  # Added shape metrics storage
+                "compactness": [],
+                "convexity": [],
+                "circularity": [],
+                "by_size": {
+                    "small": {"compactness": [], "convexity": [], "circularity": []},
+                    "medium": {"compactness": [], "convexity": [], "circularity": []},
+                    "large": {"compactness": [], "convexity": [], "circularity": []}
+                }
+            }
         }
         
         # Create directory for model visualizations
@@ -344,6 +354,26 @@ class ModelEvaluator:
                                 }
                                 
                                 coco_segm_predictions.append(segm_pred)
+                                
+                                # --- SHAPE METRICS CALCULATION ---
+                                shape_metrics = self.calculate_shape_metrics(binary_mask)
+                                
+                                # Store shape metrics
+                                metrics["shape_metrics"]["compactness"].append(shape_metrics["compactness"])
+                                metrics["shape_metrics"]["convexity"].append(shape_metrics["convexity"])
+                                metrics["shape_metrics"]["circularity"].append(shape_metrics["circularity"])
+                                
+                                # Distribute by size
+                                if shape_metrics["circularity"] > 0.5:  # Heuristic for small/medium/large based on circularity
+                                    size_category = "small"
+                                elif shape_metrics["circularity"] > 0.2:
+                                    size_category = "medium"
+                                else:
+                                    size_category = "large"
+                                
+                                metrics["shape_metrics"]["by_size"][size_category]["compactness"].append(shape_metrics["compactness"])
+                                metrics["shape_metrics"]["by_size"][size_category]["convexity"].append(shape_metrics["convexity"])
+                                metrics["shape_metrics"]["by_size"][size_category]["circularity"].append(shape_metrics["circularity"])
                                 
                             except Exception as mask_err:
                                 print(f"Error converting segmentation mask: {mask_err}")
@@ -672,6 +702,85 @@ class ModelEvaluator:
             json.dump(serializable_results, f, indent=2)
         
         print(f"Results saved to {results_file}")
+
+    def calculate_shape_metrics(self, binary_mask):
+        """
+        Calculate shape metrics for a segmentation mask.
+        
+        Args:
+            binary_mask (np.ndarray): Binary segmentation mask (0-1 values)
+            
+        Returns:
+            dict: Dictionary with shape metrics (compactness, convexity, circularity)
+        """
+        # Ensure mask is binary
+        mask = (binary_mask > 0).astype(np.uint8)
+        
+        # Find contours in the mask
+        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        
+        # Initialize metrics
+        metrics = {
+            'compactness': 0.0,
+            'convexity': 0.0,
+            'circularity': 0.0,
+            'count': 0  # Number of contours analyzed
+        }
+        
+        if not contours:
+            return metrics
+            
+        # Calculate metrics for each contour and average them
+        for contour in contours:
+            # Skip tiny contours (likely noise)
+            if cv2.contourArea(contour) < 10:  
+                continue
+                
+            # Perimeter
+            perimeter = cv2.arcLength(contour, True)
+            if perimeter == 0:
+                continue
+                
+            # Area
+            area = cv2.contourArea(contour)
+            if area == 0:
+                continue
+                
+            # Convex hull
+            hull = cv2.convexHull(contour)
+            hull_area = cv2.contourArea(hull)
+            hull_perimeter = cv2.arcLength(hull, True)
+            
+            # Calculate metrics
+            # 1. Compactness: 4π*area/perimeter²
+            compactness = (4 * np.pi * area) / (perimeter * perimeter) if perimeter > 0 else 0
+            
+            # 2. Convexity: perimeter of convex hull / perimeter of contour
+            convexity = hull_perimeter / perimeter if perimeter > 0 else 0
+            
+            # 3. Circularity: How closely shape resembles a circle
+            # sqrt(area / π) / (maximum distance from center to any point)
+            # Approximate using ratio of area to minimum enclosing circle
+            (x, y), radius = cv2.minEnclosingCircle(contour)
+            if radius > 0:
+                circle_area = np.pi * (radius * radius)
+                circularity = area / circle_area if circle_area > 0 else 0
+            else:
+                circularity = 0
+                
+            # Update aggregate metrics
+            metrics['compactness'] += compactness
+            metrics['convexity'] += convexity
+            metrics['circularity'] += circularity
+            metrics['count'] += 1
+            
+        # Calculate averages
+        if metrics['count'] > 0:
+            metrics['compactness'] /= metrics['count']
+            metrics['convexity'] /= metrics['count']
+            metrics['circularity'] /= metrics['count']
+            
+        return metrics
 
 def main():
     # Parse command line arguments

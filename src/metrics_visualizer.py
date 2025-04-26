@@ -592,41 +592,40 @@ class MetricsVisualizer:
 
     def _plot_ap_size(self, ax):
         """Plots Shape Analysis metrics for segmentation models."""
-        # Check if shape analysis metrics are available in results
-        has_shape_data = False
-        shape_analysis_metrics = {}
+        # Check if shape metrics are available in results
+        has_shape_metrics = False
+        shape_metrics_data = {}
         
-        # First try to find direct shape metrics in the results
+        # First try to find shape metrics in the results
         for model in self.models:
-            # Check if model has shape_metrics in the results data
             if model in self.results and 'shape_metrics' in self.results[model]:
-                has_shape_data = True
-                shape_metrics = self.results[model]['shape_metrics']
+                has_shape_metrics = True
+                shape_data = self.results[model]['shape_metrics']
                 
-                # Extract key shape metrics if they exist
-                if isinstance(shape_metrics, dict):
-                    shape_analysis_metrics[model] = {
-                        'Compactness': shape_metrics.get('mean_compactness', 0.0),
-                        'Convexity': shape_metrics.get('mean_convexity', 0.0),
-                        'Circularity': shape_metrics.get('mean_circularity', 0.0),
+                # Get average metrics across all masks
+                if shape_data.get('compactness') and len(shape_data.get('compactness', [])) > 0:
+                    shape_metrics_data[model] = {
+                        'Compactness': np.mean(shape_data.get('compactness', [0])),
+                        'Convexity': np.mean(shape_data.get('convexity', [0])),
+                        'Circularity': np.mean(shape_data.get('circularity', [0]))
                     }
         
         # If we have shape metrics, create a specialized bar chart
-        if has_shape_data:
-            model_names = list(shape_analysis_metrics.keys())
-            shape_metrics = ['Compactness', 'Convexity', 'Circularity']
+        if has_shape_metrics and shape_metrics_data:
+            model_names = list(shape_metrics_data.keys())
+            metrics_to_plot = ['Compactness', 'Convexity', 'Circularity']
             
             # Prepare data for plotting
-            data = {metric: [] for metric in shape_metrics}
+            data = {metric: [] for metric in metrics_to_plot}
             for model in model_names:
-                for metric in shape_metrics:
+                for metric in metrics_to_plot:
                     # Get value or default to 0
-                    value = shape_analysis_metrics[model].get(metric, 0.0)
+                    value = shape_metrics_data[model].get(metric, 0.0)
                     data[metric].append(value)
                     
             # Set up plot
             n_models = len(model_names)
-            n_metrics = len(shape_metrics)
+            n_metrics = len(metrics_to_plot)
             bar_width = 0.25
             index = np.arange(n_models)
             
@@ -637,10 +636,10 @@ class MetricsVisualizer:
                 'Circularity': '#006400'   # Dark Green
             }
             
-            colors = [metric_colors.get(metric, plt.cm.tab10(i/n_metrics)) for i, metric in enumerate(shape_metrics)]
+            colors = [metric_colors.get(metric, plt.cm.tab10(i/n_metrics)) for i, metric in enumerate(metrics_to_plot)]
             
             # Create bars for each metric
-            for i, metric in enumerate(shape_metrics):
+            for i, metric in enumerate(metrics_to_plot):
                 values = data[metric]
                 rects = ax.bar(index + i * bar_width, values, bar_width,
                              label=metric, color=colors[i])
@@ -682,6 +681,82 @@ class MetricsVisualizer:
             props = dict(boxstyle='round', facecolor='wheat', alpha=0.2)
             ax.text(0.5, -0.20, explanation, transform=ax.transAxes,
                   fontsize=8, ha='center', va='center', bbox=props)
+            return
+            
+        # Check if we have shape metrics by object size as a fallback
+        has_size_shape_metrics = False
+        size_shape_data = {}
+        
+        for model in self.models:
+            if model in self.results and 'shape_metrics' in self.results[model]:
+                shape_data = self.results[model]['shape_metrics']
+                if 'by_size' in shape_data:
+                    by_size = shape_data['by_size']
+                    if by_size and all(size in by_size for size in ['small', 'medium', 'large']):
+                        has_size_shape_metrics = True
+                        
+                        # Calculate average metrics for each size category
+                        size_shape_data[model] = {
+                            'Small': np.mean(by_size['small'].get('circularity', [0])),
+                            'Medium': np.mean(by_size['medium'].get('circularity', [0])),
+                            'Large': np.mean(by_size['large'].get('circularity', [0]))
+                        }
+        
+        # If we have shape metrics by size, create a bar chart
+        if has_size_shape_metrics and size_shape_data:
+            model_names = list(size_shape_data.keys())
+            size_categories = ['Small', 'Medium', 'Large']
+            
+            # Prepare data for plotting
+            data = {size: [] for size in size_categories}
+            for model in model_names:
+                for size in size_categories:
+                    # Get value or default to 0
+                    value = size_shape_data[model].get(size, 0.0)
+                    data[size].append(value)
+                    
+            # Set up plot
+            n_models = len(model_names)
+            n_sizes = len(size_categories)
+            bar_width = 0.25
+            index = np.arange(n_models)
+            
+            # Use color scheme that matches size
+            size_colors = {
+                'Small': '#ff9896',  # Light red
+                'Medium': '#aec7e8', # Light blue
+                'Large': '#98df8a'   # Light green
+            }
+            
+            colors = [size_colors.get(size, plt.cm.tab10(i/n_sizes)) for i, size in enumerate(size_categories)]
+            
+            # Create bars for each size
+            for i, size in enumerate(size_categories):
+                values = data[size]
+                rects = ax.bar(index + i * bar_width, values, bar_width,
+                             label=size, color=colors[i])
+                
+                # Add data labels on bars
+                for j, rect in enumerate(rects):
+                    height = rect.get_height()
+                    # Format label
+                    label_text = f'{height:.3f}'
+                    ax.annotate(label_text,
+                              xy=(rect.get_x() + rect.get_width() / 2, height),
+                              xytext=(0, 3),  # 3 points vertical offset
+                              textcoords="offset points",
+                              ha='center', va='bottom', fontsize=8)
+                    
+            # Configure axes
+            ax.set_ylabel('Circularity Value (0-1)')
+            ax.set_title('Shape Analysis by Object Size')
+            ax.set_xticks(index + bar_width * (n_sizes - 1) / 2)
+            ax.set_xticklabels(model_names, rotation=0, ha='center')
+            ax.legend(title="Object Size", fontsize='small')
+            
+            # Set y-limits (circularity is typically 0-1)
+            ax.set_ylim(0, 1.05)
+            ax.grid(axis='y', linestyle='--', alpha=0.6)
             return
         
         # Check if segmentation metrics are available as fallback
@@ -771,7 +846,7 @@ class MetricsVisualizer:
             ax.set_ylim(0, max(0.01, max_val * 1.2))
             ax.grid(axis='y', linestyle='--', alpha=0.6)
             return
-            
+        
         # Last resort - no metrics available
         ax.text(0.5, 0.5, 'Shape analysis metrics not available.\nNo segmentation or object size data found.',
                ha='center', va='center', transform=ax.transAxes)
@@ -800,71 +875,79 @@ class MetricsVisualizer:
 
     def _plot_detection_distribution(self, ax):
         """
-        Plots the distribution of detections per image/frame using box plots.
-        Shows a message if no meaningful data (counts > 0) is present.
+        Plots performance by object size instead of detection distribution.
+        Shows AP values for small, medium, and large objects for each model.
         """
-        detection_data = self.data.get('detection_counts', {})
-        if not detection_data:
-            ax.text(0.5, 0.5, 'Detection count data missing.', ha='center', va='center', transform=ax.transAxes)
+        # Check if we have the necessary metrics
+        size_metrics_to_try = ['Small Objects AP', 'Medium Objects AP', 'Large Objects AP']
+        available_size_metrics = [m for m in size_metrics_to_try if m in self.data['summary_df'].columns]
+        
+        if not available_size_metrics:
+            ax.text(0.5, 0.5, 'Object size performance data not available.',
+                   ha='center', va='center', transform=ax.transAxes)
             ax.set_title('Distribution of Detections')
-            ax.set_xticks([]) # No labels if no data structure
-            ax.set_yticks([])
             return
-
-        model_names = list(detection_data.keys())
-        data_to_plot = [detection_data[model] for model in model_names]
-
-        # --- Check for meaningful data ---
-        has_meaningful_data = False
-        for data_list in data_to_plot:
-            # Check if the list contains any number greater than 0
-            if any(isinstance(d, (int, float)) and d > 1e-9 for d in data_list): # Use tolerance
-                has_meaningful_data = True
-                break
-
-        # --- Set common Axes properties ---
-        ax.set_title('Distribution of Detections')
-        # Set X ticks and labels regardless of data to show model names
-        ax.set_xticks(range(1, len(model_names) + 1))
-        ax.set_xticklabels(model_names, rotation=0, ha='center')
-        ax.set_ylabel('Detections Count')
+            
+        # Get data for plotting
+        df = self.data['summary_df'][available_size_metrics]
+        
+        # Prepare the plot
+        n_models = len(df)
+        bar_width = 0.25
+        index = np.arange(n_models)
+        
+        # Set up legend labels and colors that match the size categories
+        legend_labels = {
+            'Small Objects AP': 'Small',
+            'Medium Objects AP': 'Medium',
+            'Large Objects AP': 'Large'
+        }
+        
+        # Use a distinct color scheme for object sizes
+        size_colors = {
+            'Small Objects AP': '#ff9896',  # Light red
+            'Medium Objects AP': '#aec7e8', # Light blue
+            'Large Objects AP': '#98df8a'   # Light green
+        }
+        
+        # Plot each size category
+        for i, metric in enumerate(available_size_metrics):
+            values = df[metric]
+            rects = ax.bar(index + i * bar_width, values, bar_width,
+                          label=legend_labels.get(metric, metric),
+                          color=size_colors.get(metric, plt.cm.tab10(i/len(available_size_metrics))))
+            
+            # Add data labels on bars
+            for j, rect in enumerate(rects):
+                height = rect.get_height()
+                # Format precision based on value
+                if height < 0.01:
+                    label_text = f'{height:.4f}'
+                else:
+                    label_text = f'{height:.3f}'
+                    
+                ax.annotate(label_text,
+                          xy=(rect.get_x() + rect.get_width() / 2, height),
+                          xytext=(0, 3),  # 3 points vertical offset
+                          textcoords="offset points",
+                          ha='center', va='bottom', fontsize=8)
+        
+        # Configure axes
+        ax.set_ylabel('AP Value')
+        ax.set_title('Distribution of Detections by Object Size')
+        ax.set_xticks(index + bar_width * (len(available_size_metrics) - 1) / 2)
+        ax.set_xticklabels(df.index, rotation=0, ha='center')
+        ax.legend(title="Object Size", fontsize='small')
+        
+        # Set y-limits based on data
+        max_val = df.max().max() if not df.empty else 0
+        if max_val < 0.01:
+            # For very small values, use larger scale for visibility
+            ax.set_ylim(0, 0.05)
+        else:
+            ax.set_ylim(0, max_val * 1.2)
+            
         ax.grid(axis='y', linestyle='--', alpha=0.6)
-        # Set default Y limit based on calculated max or 10
-        ax.set_ylim(bottom=0, top=self.data.get('max_detection_value', 10))
-
-
-        if not has_meaningful_data:
-            # --- Display the message if no meaningful data ---
-            ax.text(0.5, 0.5, 'No detection count data available\n(all counts are zero or missing).',
-                    horizontalalignment='center', verticalalignment='center',
-                    transform=ax.transAxes, fontsize=10, color='orange',
-                    bbox=dict(facecolor='white', alpha=0.8, pad=0.3, edgecolor='none'))
-            # Ensure Y limit is set even when displaying text
-            ax.set_ylim(0, 10) # Keep default Y limit consistent with message display
-            return # Stop here if no data
-
-        # --- Plot Boxplot if meaningful data exists ---
-        bp = ax.boxplot(data_to_plot,
-                        labels=None, # Labels are set via xticklabels
-                        patch_artist=True,
-                        showfliers=True,
-                        medianprops={'color': 'black', 'linewidth': 1.5},
-                        boxprops={'edgecolor': 'black', 'linewidth': 0.5},
-                        whiskerprops={'color': 'black', 'linewidth': 0.5, 'linestyle': '--'},
-                        capprops={'color': 'black', 'linewidth': 0.5})
-
-        # Customize box colors
-        colors = [get_model_color(model) for model in model_names]
-        for patch, color in zip(bp['boxes'], colors):
-            patch.set_facecolor(color)
-            patch.set_alpha(0.7)
-
-        # Customize outlier markers
-        for flier in bp['fliers']:
-             flier.set(marker='o', markerfacecolor='red', markersize=5,
-                       markeredgecolor='none', alpha=0.4)
-        # Y-limit is already set based on max_detection_value
-
 
     def _plot_f1_vs_speed(self, ax):
         """Plots F1-Score vs Speed scatter plot."""
