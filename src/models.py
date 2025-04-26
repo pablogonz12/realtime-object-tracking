@@ -14,6 +14,17 @@ import torchvision
 from torchvision.transforms import functional as F
 from pathlib import Path
 
+# Mapping from YOLO class index (0-79) to official COCO category ID (1-90)
+# Based on standard COCO dataset category IDs
+YOLO_CLS_INDEX_TO_COCO_ID = {
+    0: 1, 1: 2, 2: 3, 3: 4, 4: 5, 5: 6, 6: 7, 7: 8, 8: 9, 9: 10, 10: 11, 11: 13, 12: 14, 13: 15, 14: 16,
+    15: 17, 16: 18, 17: 19, 18: 20, 19: 21, 20: 22, 21: 23, 22: 24, 23: 25, 24: 27, 25: 28, 26: 31, 27: 32,
+    28: 33, 29: 34, 30: 35, 31: 36, 32: 37, 33: 38, 34: 39, 35: 40, 36: 41, 37: 42, 38: 43, 39: 44, 40: 46,
+    41: 47, 42: 48, 43: 49, 44: 50, 45: 51, 46: 52, 47: 53, 48: 54, 49: 55, 50: 56, 51: 57, 52: 58, 53: 59,
+    54: 60, 55: 61, 56: 62, 57: 63, 58: 64, 59: 65, 60: 67, 61: 70, 62: 72, 63: 73, 64: 74, 65: 75, 66: 76,
+    67: 77, 68: 78, 69: 79, 70: 80, 71: 81, 72: 82, 73: 84, 74: 85, 75: 86, 76: 87, 77: 88, 78: 89, 79: 90
+}
+
 # COCO Class Names (80 classes + background)
 COCO_CLASSES = [
     '__background__', 'person', 'bicycle', 'car', 'motorcycle', 'airplane', 'bus',
@@ -307,17 +318,21 @@ class YOLOWrapper:
                     # Get YOLO's class ID (0-indexed)
                     yolo_class_id = int(box.cls[0])
                     
-                    # CRITICAL FIX: Map YOLO's 0-indexed class IDs to COCO's 1-indexed class IDs
-                    # COCO class IDs start at 1, with 1=person, 2=bicycle, etc.
-                    # The +1 adjustment converts from YOLO's 0-based indexing to COCO's 1-based indexing
-                    coco_class_id = yolo_class_id + 1
+                    # CRITICAL FIX: Map YOLO's 0-indexed class IDs to official COCO category IDs
+                    # Use our mapping dictionary instead of simply adding 1
+                    coco_category_id = YOLO_CLS_INDEX_TO_COCO_ID.get(yolo_class_id)
                     
                     score = float(box.conf[0])
                     class_name = names.get(yolo_class_id, f"ID:{yolo_class_id}")
                     
+                    # Skip detection if the class ID mapping failed
+                    if coco_category_id is None:
+                        print(f"Warning: Could not map YOLO class index {yolo_class_id} ('{class_name}') to COCO category ID. Skipping detection.")
+                        continue
+                    
                     detections.append({
                         "box": [x1, y1, x2, y2],
-                        "class_id": coco_class_id,  # Use the COCO 1-indexed class ID 
+                        "class_id": coco_category_id,  # Use the correctly mapped COCO category ID
                         "class_name": class_name,
                         "score": score
                     })
