@@ -12,6 +12,11 @@ opencv-python
 # PyO3 for Rust integration (If still needed, otherwise remove)
 pyo3
 
+# DINO-Seg dependencies
+transformers
+timm
+huggingface_hub
+
 # MMDetection dependencies (REMOVED)
 # Note: Specific versions might be required depending on your PyTorch/CUDA setup.
 # Refer to MMDetection installation guide if auto-install fails.

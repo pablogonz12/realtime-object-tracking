@@ -35,7 +35,7 @@ MODEL_COLORS = {
     'mask-rcnn': '#d62728', # Brick Red 
     'yolo-seg': '#1f77b4',  # Muted Blue (Changed from red)
     # Add future models here, e.g.:
-    # 'MyNewModel': '#9467bd', # Muted Purple
+    'dino-seg': '#9467bd', # Muted Purple
     'Default': '#888888'    # Grey fallback for unlisted models
 }
 
