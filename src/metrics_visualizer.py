@@ -545,7 +545,18 @@ class MetricsVisualizer:
             
         ax.set_ylim(0, upper_limit)
         ax.grid(axis='y', linestyle='--', alpha=0.6)
-
+        
+        # Add explanatory text about precision, recall, and F1-score metrics
+        explanation = (
+            "Precision: Accuracy of positive predictions (TP/(TP+FP))\n"
+            "Recall: Ability to find all positive samples (TP/(TP+FN))\n"
+            "F1-Score: Harmonic mean of Precision and Recall"
+        )
+        
+        # Add explanatory text in a box at the bottom
+        props = dict(boxstyle='round', facecolor='wheat', alpha=0.2)
+        ax.text(0.5, -0.20, explanation, transform=ax.transAxes,
+              fontsize=8, ha='center', va='center', bbox=props)
 
     def _plot_ap_iou(self, ax):
         """Plots Average Precision (AP) at different IoU thresholds."""
@@ -631,7 +642,18 @@ class MetricsVisualizer:
         else: upper_limit = max_plotted * 1.2
         ax.set_ylim(0, upper_limit)
         ax.grid(axis='y', linestyle='--', alpha=0.6)
-
+        
+        # Add explanatory text about AP metrics at different IoU thresholds
+        explanation = (
+            "mAP (0.50:0.95): Mean AP averaged over IoU thresholds from 0.5 to 0.95\n"
+            "AP@0.50: AP at IoU threshold of 0.50 (permissive overlap criterion)\n"
+            "AP@0.75: AP at IoU threshold of 0.75 (strict overlap criterion)"
+        )
+        
+        # Add explanatory text in a box at the bottom
+        props = dict(boxstyle='round', facecolor='wheat', alpha=0.2)
+        ax.text(0.5, -0.20, explanation, transform=ax.transAxes,
+              fontsize=8, ha='center', va='center', bbox=props)
 
     def _plot_ap_size(self, ax):
         """Plots Shape Analysis metrics for segmentation models."""
@@ -897,13 +919,23 @@ class MetricsVisualizer:
 
 
     def _plot_fps(self, ax):
-        """Plots processing speed (FPS)."""
+        """Plots processing speed (FPS) and inference time (ms) side by side."""
         if 'Speed (FPS)' not in self.data['summary_df'].columns:
              ax.text(0.5, 0.5, 'FPS data not available.', ha='center', va='center', transform=ax.transAxes)
-             ax.set_title('Processing Speed (FPS)')
+             ax.set_title('Processing Speed')
              return
 
+        # Get FPS data and calculate inference time (ms)
         fps_data = self.data['summary_df']['Speed (FPS)']
+        time_ms_data = 1000.0 / fps_data  # Convert FPS to milliseconds per frame
+        
+        # Set up the plot
+        models = fps_data.index
+        n_models = len(models)
+        
+        # Set positions for the bars - we'll need two bars per model
+        x_pos = np.arange(n_models)
+        bar_width = 0.35  # Narrower bars to fit two per model
         
         # Create a consistent color mapping for models based on their order
         # Use the same palette colors (blue, orange, teal) that we use for metrics
@@ -911,7 +943,7 @@ class MetricsVisualizer:
         
         # Assign colors to models in order
         model_colors = {}
-        for i, model in enumerate(fps_data.index):
+        for i, model in enumerate(models):
             if i < len(palette_colors):
                 # Use the palette colors for the first three models
                 model_colors[model] = palette_colors[i]
@@ -919,18 +951,75 @@ class MetricsVisualizer:
                 # Fall back to the original _get_model_color for additional models
                 model_colors[model] = self._get_model_color(model)
         
-        # Use the color mapping we just created
-        colors = [model_colors[model] for model in fps_data.index]
-        rects = ax.bar(fps_data.index, fps_data, color=colors)
-
-        ax.set_ylabel('Frames Per Second')
-        ax.set_title('Processing Speed (FPS)')
-        ax.set_xticklabels(fps_data.index, rotation=0, ha='center')
+        # Create colors array for models
+        model_color_list = [model_colors[model] for model in models]
+        
+        # Create lighter versions of the colors for the time bars
+        time_colors = []
+        for color in model_color_list:
+            # Convert hex to RGB, lighten it, and convert back to hex
+            rgb = tuple(int(color[1:][i:i+2], 16) for i in (0, 2, 4))
+            lighter_rgb = tuple(min(255, int(c * 0.7 + 255 * 0.3)) for c in rgb)  # 30% lighter
+            time_colors.append(f'#{lighter_rgb[0]:02x}{lighter_rgb[1]:02x}{lighter_rgb[2]:02x}')
+        
+        # Create primary y-axis for FPS
+        fps_bars = ax.bar(x_pos - bar_width/2, fps_data, bar_width, color=model_color_list, label='FPS')
+        ax.set_ylabel('Speed (Frames Per Second)', color='black')
+        ax.set_ylim(0, max(10, fps_data.max() * 1.15))  # Add 15% padding
+        
+        # Add data labels to the FPS bars
+        for bar in fps_bars:
+            height = bar.get_height()
+            ax.annotate(f'{height:.1f}',
+                       xy=(bar.get_x() + bar.get_width() / 2, height),
+                       xytext=(0, 3),  # 3 points vertical offset
+                       textcoords="offset points",
+                       ha='center', va='bottom', fontsize=8)
+        
+        # Create secondary y-axis for milliseconds
+        ax2 = ax.twinx()
+        time_bars = ax2.bar(x_pos + bar_width/2, time_ms_data, bar_width, color=time_colors, label='Time (ms)')
+        ax2.set_ylabel('Inference Time (ms)', color='black')
+        
+        # Set a reasonable upper limit for the time axis based on the data
+        max_time = time_ms_data.max()
+        ax2.set_ylim(0, max(50, max_time * 1.15))  # Add 15% padding, minimum 50ms scale
+        
+        # Add data labels to the time bars
+        for bar in time_bars:
+            height = bar.get_height()
+            ax2.annotate(f'{height:.1f}',
+                        xy=(bar.get_x() + bar.get_width() / 2, height),
+                        xytext=(0, 3),  # 3 points vertical offset
+                        textcoords="offset points",
+                        ha='center', va='bottom', fontsize=8)
+        
+        # Set the x-ticks to be in the middle of the model groups
+        ax.set_xticks(x_pos)
+        ax.set_xticklabels(models, rotation=0, ha='center')
+        
+        # Add a grid for better readability (only for the primary y-axis)
         ax.grid(axis='y', linestyle='--', alpha=0.6)
-        self._add_value_labels(ax, rects, precision=1)
-        max_fps = fps_data.max() if not fps_data.empty else 0
-        ax.set_ylim(0, max(10, max_fps * 1.15))
-
+        
+        # Add a combined legend for both axes
+        # Create handles for the legend manually
+        from matplotlib.patches import Patch
+        legend_elements = [
+            Patch(facecolor=model_color_list[0], label='Speed (FPS)'),
+            Patch(facecolor=time_colors[0], label='Time (ms)')
+        ]
+        ax.legend(handles=legend_elements, loc='upper right')
+        
+        # Update the chart title
+        ax.set_title('Processing Speed & Inference Time')
+        
+        # Add explanatory text about the relationship between FPS and Time (ms)
+        explanation = "Note: Inference Time (ms) = 1000 / Speed (FPS)"
+        
+        # Add explanatory text in a box at the bottom
+        props = dict(boxstyle='round', facecolor='wheat', alpha=0.2)
+        ax.text(0.5, -0.15, explanation, transform=ax.transAxes,
+              fontsize=8, ha='center', va='center', bbox=props)
 
     def _plot_detection_distribution(self, ax):
         """
@@ -1052,6 +1141,18 @@ class MetricsVisualizer:
             
         ax.set_ylim(0, upper_limit)
         ax.grid(axis='y', linestyle='--', alpha=0.6)
+        
+        # Add explanatory text about object size categories
+        explanation = (
+            "Small Objects: Area < 32² pixels\n"
+            "Medium Objects: 32² - 96² pixels\n"
+            "Large Objects: Area > 96² pixels"
+        )
+        
+        # Add explanatory text in a box at the bottom
+        props = dict(boxstyle='round', facecolor='wheat', alpha=0.2)
+        ax.text(0.5, -0.20, explanation, transform=ax.transAxes,
+              fontsize=8, ha='center', va='center', bbox=props)
 
     def _plot_f1_vs_speed(self, ax):
         """Plots F1-Score vs Speed scatter plot."""
@@ -1467,7 +1568,7 @@ class MetricsVisualizer:
             # Use COCO metrics for mAP and AR when available, otherwise use our default calculations
             metrics['mAP (IoU=0.50:0.95)'] = coco_metrics.get('AP_IoU=0.50:0.95', 0.0)
             metrics['AP (IoU=0.50)'] = coco_metrics.get('AP_IoU=0.50', 0.0)
-            metrics['AP (IoU=0.75)'] = coco_metrics.get('AP_IoU=0.75', 0.0)
+            metrics['AP (IoU=0.75)'] =coco_metrics.get('AP_IoU=0.75', 0.0)
             metrics['Small Objects AP'] = coco_metrics.get('AP_small', 0.0)
             metrics['Medium Objects AP'] = coco_metrics.get('AP_medium', 0.0)
             metrics['Large Objects AP'] = coco_metrics.get('AP_large', 0.0)
@@ -1486,7 +1587,7 @@ class MetricsVisualizer:
             else:
                 # Alternative F1 calculation for cases with zero AP/AR
                 # This is an approximation based on detection counts
-                total_detections = model_data.get('total_detections', 0)
+                total_detections = model_data.get('total_detections',0)
                 if total_detections > 0:
                     # We don't have ground truth information directly available here,
                     # so we'll use a very rough approximation
@@ -1533,11 +1634,15 @@ class MetricsVisualizer:
         metrics_to_include = [
             'mAP (IoU=0.50:0.95)', # Overall mAP 
             'AP (IoU=0.50)',        # Standard AP at IoU=0.5
+            'AP (IoU=0.75)',        # AP at IoU=0.75
+            'Precision',            # Precision
+            'Recall',               # Recall
+            'AR (max=100)',         # Average Recall
             'F1-Score',             # F1 Score
             'Large Objects AP',     # Object size performance
             'Medium Objects AP',
             'Small Objects AP',
-            'Speed (FPS)'           # Speed performance
+            'Speed (FPS)',          # Speed performance
         ]
         
         # Filter to only include metrics that exist in our data
@@ -1551,9 +1656,66 @@ class MetricsVisualizer:
         # Extract and round the data for display
         display_df = self.data['summary_df'][available_metrics].copy()
         
+        # Calculate F1-Score/FPS ratio for each model (Performance efficiency)
+        if 'F1-Score' in display_df.columns and 'Speed (FPS)' in display_df.columns:
+            # Calculate F1-Score/Performance ratio (efficiency measure)
+            display_df['F1/FPS Ratio'] = display_df['F1-Score'] / display_df['Speed (FPS)']
+            # Multiply by 100 to make values more readable
+            display_df['F1/FPS Ratio'] *= 100.0
+            # Add this metric to our available metrics
+            available_metrics.append('F1/FPS Ratio')
+            
+        # Add Inference Time (ms) based on FPS
+        if 'Speed (FPS)' in display_df.columns:
+            # Convert FPS to milliseconds per inference
+            display_df['Inference Time (ms)'] = 1000.0 / display_df['Speed (FPS)']
+            # Add to our available metrics
+            available_metrics.append('Inference Time (ms)')
+        
+        # Add Model Size/Parameters if available in the results data
+        model_sizes = {}
+        for model in self.models:
+            # Try to find model size in the results data
+            if model in self.results:
+                # Check various possible keys where model size might be stored
+                size_mb = None
+                for key in ['model_size_mb', 'size_mb', 'model_size']:
+                    if key in self.results[model]:
+                        size_mb = self.results[model][key]
+                        break
+                
+                # If not found, try to estimate from model path
+                if size_mb is None and 'model_path' in self.results[model]:
+                    model_path = self.results[model]['model_path']
+                    if model_path and Path(model_path).exists():
+                        size_bytes = Path(model_path).stat().st_size
+                        size_mb = size_bytes / (1024 * 1024)  # Convert bytes to MB
+                
+                model_sizes[model] = size_mb if size_mb is not None else None
+        
+        # If we found any model sizes, add to the dataframe
+        if any(size is not None for size in model_sizes.values()):
+            display_df['Model Size (MB)'] = pd.Series(model_sizes)
+            available_metrics.append('Model Size (MB)')
+        
         # Format the table data for better readability
         table_data = []
-        header_row = ['Model'] + [m.replace(' (IoU=0.50:0.95)', '').replace(' Objects AP', '') for m in available_metrics]
+        # Create shortened header labels to save space
+        header_mapping = {
+            'mAP (IoU=0.50:0.95)': 'mAP',
+            'AP (IoU=0.50)': 'AP@0.50',
+            'AP (IoU=0.75)': 'AP@0.75',
+            'Large Objects AP': 'Large',
+            'Medium Objects AP': 'Medium',
+            'Small Objects AP': 'Small',
+            'Speed (FPS)': 'FPS',
+            'AR (max=100)': 'AR',
+            'Inference Time (ms)': 'Time (ms)',
+            'Model Size (MB)': 'Size (MB)',
+            'F1/FPS Ratio': 'F1/FPS'
+        }
+        
+        header_row = ['Model'] + [header_mapping.get(m, m) for m in available_metrics]
         table_data.append(header_row)
         
         # For each model, add a row with formatted values
@@ -1562,10 +1724,24 @@ class MetricsVisualizer:
             for metric in available_metrics:
                 val = display_df.loc[model_name, metric]
                 
+                # Skip NaN values
+                if pd.isna(val):
+                    row.append('N/A')
+                    continue
+                
                 # Format based on metric type
-                if 'Speed' in metric:
-                    # FPS with 1 decimal place
+                if 'Speed' in metric or 'Time' in metric:
+                    # FPS or Inference Time with 1 decimal place
                     formatted_val = f"{val:.1f}"
+                elif 'Size' in metric:
+                    # Model size with 1 decimal place
+                    formatted_val = f"{val:.1f}"
+                elif 'F1/FPS' in metric:
+                    # F1/FPS Ratio with scientific notation if very small, otherwise 3 decimals
+                    if val < 0.001:
+                        formatted_val = f"{val:.3e}"
+                    else:
+                        formatted_val = f"{val:.3f}"
                 elif val < 0.01:
                     # Very small values with scientific notation
                     formatted_val = f"{val:.3e}"
@@ -1579,26 +1755,41 @@ class MetricsVisualizer:
                 row.append(formatted_val)
             
             table_data.append(row)
-            
-        # Create the table
+        
+        # Create the table with wider spacing and positioned higher
+        # Adjust the bbox to make the table 25% wider overall - expand horizontally beyond normal bounds
+        # This will make each column 25% wider while maintaining the same number of columns
         table = ax.table(
             cellText=table_data,
             loc='center',
             cellLoc='center',
-            bbox=[0.0, 0.0, 1.0, 1.0]  # Fill the entire subplot area
+            bbox=[-0.125, 0.08, 1.25, 0.80]  # Position table higher with 8% bottom margin, and increase width by 25%
         )
         
         # Style the table
         table.auto_set_font_size(False)
-        table.set_fontsize(10)
+        table.set_fontsize(8.5)  # Slightly smaller font to fit more columns
         
         # Style header row
         for i, cell in enumerate(table._cells[(0, col)] for col in range(len(header_row))):
             cell.set_text_props(weight='bold', color='white')
             cell.set_facecolor('#4472C4')  # Blue header background
         
-        # Set column widths based on content
-        table.auto_set_column_width([i for i in range(len(header_row))])
+        # Set fixed column widths to ensure even spacing 
+        # Make the first column (model names) twice as wide as other columns
+        # Calculate the width distribution: if first column is 2x, and we have n columns total
+        # First column gets 2/(n+1) of the width, other columns each get 1/(n+1)
+        num_cols = len(header_row)
+        first_col_width = 2.0 / (num_cols + 1)  # Model name column gets twice the width
+        other_col_width = 1.0 / (num_cols + 1)  # Other columns share the remaining space evenly
+        
+        col_widths = [first_col_width] + [other_col_width] * (num_cols - 1)
+        
+        for i, width in enumerate(col_widths):
+            for row in range(len(table_data)):
+                table._cells[(row, i)].set_width(width)
+                # Increase the height of each row for better vertical spacing
+                table._cells[(row, i)].set_height(0.07)
         
         # Alternate row colors for better readability
         for row_idx in range(1, len(table_data)):
@@ -1611,19 +1802,52 @@ class MetricsVisualizer:
                 else:
                     cell.set_facecolor('#F5F8FF')  # Even lighter blue for even rows
                     
+                # Add padding inside cells by adjusting text positioning
+                cell._loc = 'center'
+                
                 # Highlight best values in each column - skip model name column (0)
                 if col_idx > 0:
+                    # Skip N/A values
+                    if table_data[row_idx][col_idx] == 'N/A':
+                        continue
+                        
                     # Extract numeric values for this column to find the best
-                    col_values = [float(table_data[i][col_idx]) if table_data[i][col_idx] not in ['nan', 'N/A'] 
-                                 else float('-inf') for i in range(1, len(table_data))]
+                    col_values = []
+                    for i in range(1, len(table_data)):
+                        if table_data[i][col_idx] not in ['nan', 'N/A']:
+                            try:
+                                col_values.append(float(table_data[i][col_idx]))
+                            except (ValueError, TypeError):
+                                col_values.append(float('-inf'))
+                        else:
+                            col_values.append(float('-inf'))
                     
                     try:
-                        best_idx = col_values.index(max(col_values)) + 1  # +1 because we start from row 1
+                        # For inference time and F1/FPS, lower is better
+                        if 'Time' in header_row[col_idx] or 'F1/FPS' in header_row[col_idx]:
+                            best_idx = col_values.index(min([v for v in col_values if v > 0] or [float('inf')])) + 1
+                        else:
+                            # For all other metrics, higher is better
+                            best_idx = col_values.index(max(col_values)) + 1  # +1 because we start from row 1
+                        
                         if row_idx == best_idx:
                             cell.set_text_props(weight='bold', color='darkgreen')
-                    except (ValueError, TypeError):
-                        pass  # Skip highlighting if conversion issues
+                    except (ValueError, TypeError, IndexError):
+                        pass  # Skip highlighting if issues
         
+        # Add explanation for F1/FPS Ratio and Inference Time if in the table
+        explanation_texts = []
+        if 'F1/FPS Ratio' in display_df.columns:
+            explanation_texts.append("F1/FPS Ratio = (F1-Score / Speed) × 100 - Lower values indicate better efficiency")
+        if 'Inference Time (ms)' in display_df.columns:
+            explanation_texts.append("Inference Time (ms) = 1000 / FPS")
+        
+        # Display explanations with sufficient spacing
+        if explanation_texts:
+            explanation = " | ".join(explanation_texts)
+            ax.text(0.5, 0.02, explanation, transform=ax.transAxes, ha='center', 
+                    fontsize=8.5, style='italic', color='dimgray')
+            
         ax.set_title('Summary Table', size=12, y=1.02)
 
 # Example usage block for testing the script directly
@@ -1695,6 +1919,8 @@ if __name__ == "__main__":
         print("\nVisualizer could not load results. Cannot run visualization tests.")
 
     print(f"--- MetricsVisualizer Test Block Finished ---")
+
+
 
 
 
