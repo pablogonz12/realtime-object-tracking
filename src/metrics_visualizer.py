@@ -904,7 +904,23 @@ class MetricsVisualizer:
              return
 
         fps_data = self.data['summary_df']['Speed (FPS)']
-        colors = [self._get_model_color(model) for model in fps_data.index]
+        
+        # Create a consistent color mapping for models based on their order
+        # Use the same palette colors (blue, orange, teal) that we use for metrics
+        palette_colors = [self.METRIC_COLORS['Precision'], self.METRIC_COLORS['Recall'], self.METRIC_COLORS['F1-Score']]
+        
+        # Assign colors to models in order
+        model_colors = {}
+        for i, model in enumerate(fps_data.index):
+            if i < len(palette_colors):
+                # Use the palette colors for the first three models
+                model_colors[model] = palette_colors[i]
+            else:
+                # Fall back to the original _get_model_color for additional models
+                model_colors[model] = self._get_model_color(model)
+        
+        # Use the color mapping we just created
+        colors = [model_colors[model] for model in fps_data.index]
         rects = ax.bar(fps_data.index, fps_data, color=colors)
 
         ax.set_ylabel('Frames Per Second')
@@ -1299,20 +1315,27 @@ class MetricsVisualizer:
             print(f"Warning: Too many models ({len(models_to_plot)}) for radar chart. Limiting to {max_models_in_radar}.")
             models_to_plot = models_to_plot[:max_models_in_radar]
         
-        # Improve color contrast by using a different colormap if we have many models
-        if len(models_to_plot) > 7:
-            # Create a colormap with evenly spaced colors
-            colormap = plt.cm.tab20(np.linspace(0, 1, len(models_to_plot)))
-        else:
-            # For fewer models, use distinct colors
-            colormap = [self._get_model_color(model) for model in models_to_plot]
+        # Create a consistent color mapping for models based on their order
+        # Use the same palette colors (blue, orange, teal) that we use for metrics
+        palette_colors = [self.METRIC_COLORS['Precision'], self.METRIC_COLORS['Recall'], self.METRIC_COLORS['F1-Score']]
         
+        # Map colors to models
+        model_colors = {}
+        for i, model in enumerate(models_to_plot):
+            if i < len(palette_colors):
+                # Use the palette colors for the first three models
+                model_colors[model] = palette_colors[i]
+            else:
+                # Fall back to the original _get_model_color for additional models
+                model_colors[model] = self._get_model_color(model)
+        
+        # Plot each model's radar chart
         for i, model in enumerate(models_to_plot):
             data = df_radar.loc[model].tolist()
             data += data[:1]  # Close the loop
             
-            # Select color from our colormap
-            color = colormap[i] if isinstance(colormap, np.ndarray) else colormap[i]
+            # Select color from our model mapping
+            color = model_colors[model]
             
             # Plot the lines with improved visibility
             ax.plot(angles, data, linewidth=2.5, linestyle='solid', label=model, color=color, zorder=10+i)
@@ -1672,6 +1695,7 @@ if __name__ == "__main__":
         print("\nVisualizer could not load results. Cannot run visualization tests.")
 
     print(f"--- MetricsVisualizer Test Block Finished ---")
+
 
 
 
