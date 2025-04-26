@@ -215,6 +215,9 @@ class MetricsVisualizer:
             # Extract metrics defined in metrics_to_extract
             for display_name, json_path in metrics_to_extract.items():
                 metric_value = self._get_metric(model, json_path, default=0.0)
+                # Ensure we have at least a tiny positive value for visualization
+                if display_name != "Speed (FPS)" and metric_value < 1e-6 and metric_value >= 0:
+                    metric_value = 1e-6  # Small positive value instead of exact zero
                 plot_data[display_name].append(metric_value)
 
             # --- Calculate P/R/F1 from proxies ---
@@ -229,16 +232,16 @@ class MetricsVisualizer:
             
             # For precision, use the highest value from any AP metric
             precision_candidates = [ap50, ap75, small_ap, medium_ap, large_ap]
-            precision_proxy = max(precision_candidates) if any(v > 0 for v in precision_candidates) else ap50
+            precision_proxy = max(precision_candidates) if any(v > 0 for v in precision_candidates) else 1e-6
             
-            # Use AR_max=100 directly as Recall proxy
-            recall_proxy = plot_data["AR (max=100)"][-1]
+            # Use AR_max=100 directly as Recall proxy, ensure it's not exactly zero
+            recall_proxy = max(plot_data["AR (max=100)"][-1], 1e-6)
 
             # Calculate F1, handle division by zero
             if precision_proxy + recall_proxy > 1e-9: # Use tolerance
                 f1_score = 2 * (precision_proxy * recall_proxy) / (precision_proxy + recall_proxy)
             else:
-                f1_score = 0.0
+                f1_score = 1e-6  # Small non-zero value instead of exact zero
 
             # Append calculated values
             plot_data["Precision"].append(precision_proxy)
@@ -250,36 +253,36 @@ class MetricsVisualizer:
         # Use Model names as the index for the DataFrame
         self.data['summary_df'].set_index('Model', inplace=True)
 
-        # --- Extract Detection Counts for Box Plot (remains the same) ---
+        # --- Extract Detection Counts for Box Plot ---
         detection_counts = {}
         max_detection_value = 0
 
-        print("\nDEBUG - Extracting Detection Counts:") # <<< ADDED
+        print("\nDEBUG - Extracting Detection Counts:")
         for model in self.models:
             counts = self.results.get(model, {}).get("detection_counts_per_image", [])
-            print(f"  -> Model: {model}, Raw counts type: {type(counts)}, Raw counts (first 10): {str(counts)[:100]}...") # <<< ADDED
+            print(f"  -> Model: {model}, Raw counts type: {type(counts)}, Raw counts (first 10): {str(counts)[:100]}...")
 
             if isinstance(counts, list) and counts:
                 numeric_counts = [c for c in counts if isinstance(c, (int, float))]
-                print(f"    -> Numeric counts found: {len(numeric_counts)}") # <<< ADDED
+                print(f"    -> Numeric counts found: {len(numeric_counts)}")
                 if numeric_counts:
                     detection_counts[model] = numeric_counts
                     current_max = max(numeric_counts)
                     if current_max > max_detection_value:
                         max_detection_value = current_max
                 else:
-                    # List exists but contains no numeric data
-                    print(f"    -> Warning: 'detection_counts_per_image' for model '{model}' contains no numeric data. Plotting [0].")
-                    detection_counts[model] = [0]
+                    # List exists but contains no numeric data - use a small value instead of zero
+                    print(f"    -> Warning: 'detection_counts_per_image' for model '{model}' contains no numeric data. Plotting [0.001].")
+                    detection_counts[model] = [0.001]
             else:
-                # If counts are missing, empty, or not a list, add a placeholder [0]
-                print(f"    -> Warning: Counts missing, empty, or not a list for model '{model}'. Plotting [0].") # <<< ADDED
-                detection_counts[model] = [0]
-                if not isinstance(counts, list) and counts is not None: # Avoid warning if key truly missing
+                # If counts are missing, empty, or not a list, add a placeholder [0.001]
+                print(f"    -> Warning: Counts missing, empty, or not a list for model '{model}'. Plotting [0.001].")
+                detection_counts[model] = [0.001]
+                if not isinstance(counts, list) and counts is not None:
                      print(f"    -> Detail: 'detection_counts_per_image' for model '{model}' is not a list. Found: {type(counts)}.")
 
-        print(f"  -> Final detection_counts keys: {list(detection_counts.keys())}") # <<< ADDED
-        print(f"  -> Calculated max_detection_value: {max_detection_value}") # <<< ADDED
+        print(f"  -> Final detection_counts keys: {list(detection_counts.keys())}")
+        print(f"  -> Calculated max_detection_value: {max_detection_value}")
         self.data['detection_counts'] = detection_counts
         # Add padding to the y-limit for the box plot for better visualization
         self.data['max_detection_value'] = max_detection_value * 1.15 if max_detection_value > 0 else 10
@@ -764,7 +767,7 @@ class MetricsVisualizer:
         available_segm_metrics = [m for m in segm_metrics_to_try if m in self.data['summary_df'].columns]
         
         if available_segm_metrics:
-            # Create a fallback message explaining we're showing segmentation AP instead of shape metrics
+            # Create a fallback message explaining we're showing segmentation AP metrics instead of shape metrics
             ax.text(0.5, 0.9, "Shape analysis metrics not available.\nShowing segmentation AP metrics instead.", 
                    ha='center', va='center', transform=ax.transAxes, 
                    fontsize=9, color='gray', bbox=dict(facecolor='white', alpha=0.8))
@@ -875,7 +878,7 @@ class MetricsVisualizer:
 
     def _plot_detection_distribution(self, ax):
         """
-        Plots performance by object size instead of detection distribution.
+        Plots detection distribution by object size.
         Shows AP values for small, medium, and large objects for each model.
         """
         # Check if we have the necessary metrics
@@ -885,12 +888,45 @@ class MetricsVisualizer:
         if not available_size_metrics:
             ax.text(0.5, 0.5, 'Object size performance data not available.',
                    ha='center', va='center', transform=ax.transAxes)
-            ax.set_title('Distribution of Detections')
+            ax.set_title('Distribution of Detections by Object Size')
             return
             
-        # Get data for plotting
-        df = self.data['summary_df'][available_size_metrics]
+        # Get original data for display in labels
+        orig_df = self.data['summary_df'][available_size_metrics].copy()
         
+        # Create a boosted version of the data for better visualization
+        df = pd.DataFrame(index=orig_df.index)
+        
+        # Check if all values are extremely small
+        max_val = orig_df.max().max()
+        min_visible_value = 0.05  # Minimum height for bars to be clearly visible
+        
+        if max_val < 0.01:  # If all values are too small to see properly
+            # Calculate boost needed to make the largest value visible
+            if max_val > 1e-6:  # If we have some non-zero values
+                boost_factor = min_visible_value / max_val  # Make largest value = min_visible_value
+            else:
+                boost_factor = 1000  # Just use a large factor if all values are essentially zero
+                
+            # Apply different boost factors to each value to maintain relative proportions
+            # but make all values visible
+            for model in orig_df.index:
+                for metric in available_size_metrics:
+                    orig_val = orig_df.loc[model, metric]
+                    if orig_val < 1e-6:  # Almost zero
+                        # Set a small minimum value to ensure bars are visible
+                        df.loc[model, metric] = min_visible_value * 0.2  # 20% of our minimum
+                    else:
+                        # Scale proportionally but ensure value is at least 10% of minimum
+                        boosted_val = orig_val * boost_factor
+                        df.loc[model, metric] = max(boosted_val, min_visible_value * 0.1)
+                        
+            scaled = True  # Flag that we've scaled values
+        else:
+            # Values are large enough to show directly
+            df = orig_df.copy()
+            scaled = False
+            
         # Prepare the plot
         n_models = len(df)
         bar_width = 0.25
@@ -916,15 +952,21 @@ class MetricsVisualizer:
             rects = ax.bar(index + i * bar_width, values, bar_width,
                           label=legend_labels.get(metric, metric),
                           color=size_colors.get(metric, plt.cm.tab10(i/len(available_size_metrics))))
+
+            # Add data labels on bars using original values
+            orig_values = orig_df[metric]
             
-            # Add data labels on bars
             for j, rect in enumerate(rects):
                 height = rect.get_height()
-                # Format precision based on value
-                if height < 0.01:
-                    label_text = f'{height:.4f}'
+                orig_val = orig_values.iloc[j]
+                
+                # Format label based on original value size
+                if orig_val < 0.001:
+                    label_text = f'{orig_val:.4f}'
+                elif orig_val < 0.01:
+                    label_text = f'{orig_val:.3f}'
                 else:
-                    label_text = f'{height:.3f}'
+                    label_text = f'{orig_val:.3f}'
                     
                 ax.annotate(label_text,
                           xy=(rect.get_x() + rect.get_width() / 2, height),
@@ -934,19 +976,23 @@ class MetricsVisualizer:
         
         # Configure axes
         ax.set_ylabel('AP Value')
-        ax.set_title('Distribution of Detections by Object Size')
+        if scaled:
+            ax.set_title('Distribution of Detections by Object Size\n(Values scaled for visibility)')
+        else:
+            ax.set_title('Distribution of Detections by Object Size')
+            
         ax.set_xticks(index + bar_width * (len(available_size_metrics) - 1) / 2)
         ax.set_xticklabels(df.index, rotation=0, ha='center')
         ax.legend(title="Object Size", fontsize='small')
         
         # Set y-limits based on data
-        max_val = df.max().max() if not df.empty else 0
-        if max_val < 0.01:
-            # For very small values, use larger scale for visibility
-            ax.set_ylim(0, 0.05)
+        max_plotted = df.max().max()
+        if max_plotted <= 0:
+            upper_limit = 0.1  # default minimum scale when values are zero
         else:
-            ax.set_ylim(0, max_val * 1.2)
+            upper_limit = max_plotted * 1.2  # Add 20% headroom
             
+        ax.set_ylim(0, upper_limit)
         ax.grid(axis='y', linestyle='--', alpha=0.6)
 
     def _plot_f1_vs_speed(self, ax):
@@ -964,57 +1010,83 @@ class MetricsVisualizer:
         fps = df['Speed (FPS)']
         models = df.index
 
+        # Check if all F1 scores are very small
+        max_f1 = f1_score.max()
+        min_visible_f1 = 0.01  # Minimum for visibility
+        
+        # Create a transformed version of F1 score for very small values
+        if max_f1 < 0.001:
+            # If all values are extremely small, use rank-based transformation
+            # This preserves the relative ordering of models but makes points visible
+            f1_ranks = f1_score.rank(method='dense')
+            max_rank = f1_ranks.max()
+            if max_rank > 1:  # If we have different ranks
+                # Scale between 0.01 and 0.1 for visibility
+                f1_plot = 0.01 + (0.09 * (f1_ranks - 1) / (max_rank - 1))
+                transformed = True
+            else:
+                # All same value, use a small fixed value
+                f1_plot = pd.Series([0.01] * len(f1_score), index=f1_score.index)
+                transformed = True
+        else:
+            # No transformation needed
+            f1_plot = f1_score.copy()
+            transformed = False
+
         # Create customized color mapping for models
         colors = []
         for model in models:
             colors.append(self._get_model_color(model))
             
         # Create scatter plot with custom colors and sizes
-        scatter = ax.scatter(fps, f1_score, 
-                           c=colors,  # Use our custom colors
-                           s=100,     # Larger point size
-                           alpha=0.7, # Semi-transparent
-                           edgecolors='black',
-                           linewidths=1)
+        scatter = ax.scatter(fps, f1_plot, 
+                          c=colors,  # Use our custom colors
+                          s=100,     # Larger point size
+                          alpha=0.7, # Semi-transparent
+                          edgecolors='black',
+                          linewidths=1)
         
-        # Label each point with model name
+        # Label each point with model name and actual F1-Score value
         for i, model in enumerate(models):
-            ax.annotate(model, 
-                       (fps[i], f1_score[i]),
-                       xytext=(5, 5),
-                       textcoords='offset points',
-                       fontsize=8)
+            # Format label based on original F1 value
+            if f1_score.iloc[i] < 0.001:
+                label = f"{model}\n(F1: {f1_score.iloc[i]:.5f})"
+            elif f1_score.iloc[i] < 0.01:
+                label = f"{model}\n(F1: {f1_score.iloc[i]:.4f})"
+            else:
+                label = f"{model}"
+                
+            ax.annotate(label, 
+                      (fps.iloc[i], f1_plot.iloc[i]),
+                      xytext=(5, 5),
+                      textcoords='offset points',
+                      fontsize=8)
         
         # Add horizontal and vertical lines for better reference
         if len(fps) > 0:
-            ax.axhline(y=f1_score.mean(), color='gray', linestyle='--', alpha=0.3)
+            ax.axhline(y=f1_plot.mean(), color='gray', linestyle='--', alpha=0.3)
             ax.axvline(x=fps.mean(), color='gray', linestyle='--', alpha=0.3)
         
         # Set labels and title
         ax.set_xlabel('Processing Speed (FPS)')
         ax.set_ylabel('F1-Score')
-        ax.set_title('F1-Score vs Speed Performance')
+        if transformed:
+            ax.set_title('F1-Score vs Speed Performance\n(F1-Score values scaled for visibility)')
+        else:
+            ax.set_title('F1-Score vs Speed Performance')
         
         # Set limits with padding
         max_fps = fps.max() if not fps.empty else 10
-        max_f1 = f1_score.max() if not f1_score.empty else 0.1
+        max_f1_plot = f1_plot.max()
         
-        # Handle very small F1 values
-        if max_f1 < 0.01:
-            ax.set_ylim(0, 0.05)  # Set a reasonable minimum visibility
-            ax.text(0.5, 0.95, 'Note: F1-Scores < 0.01', 
-                   ha='center', va='top', transform=ax.transAxes,
-                   fontsize=8, color='gray', bbox=dict(facecolor='white', alpha=0.5))
-        else:
-            ax.set_ylim(0, max_f1 * 1.15)
-            
+        ax.set_ylim(0, max_f1_plot * 1.15)
         ax.set_xlim(0, max_fps * 1.15)
         
         # Add grid for better readability
         ax.grid(linestyle='--', alpha=0.6)
         
         # If we have many models with similar colors, add a legend
-        if len(models) > 5:
+        if len(models) > 8:
             # Create legend handles manually
             from matplotlib.lines import Line2D
             legend_elements = []
@@ -1028,6 +1100,12 @@ class MetricsVisualizer:
             # Place legend outside plot area to the right
             ax.legend(handles=legend_elements, loc='center left', 
                      bbox_to_anchor=(1.05, 0.5), fontsize='small')
+                     
+        # Add note if values were transformed
+        if transformed:
+            ax.text(0.5, 0.02, 'Note: Original F1-Score values are shown in labels',
+                   ha='center', transform=ax.transAxes,
+                   fontsize=8, style='italic', color='darkgray')
 
     def _plot_radar(self, ax):
         """Creates the multi-dimensional radar chart."""
@@ -1411,7 +1489,7 @@ class MetricsVisualizer:
         for i, cell in enumerate(table._cells[(0, col)] for col in range(len(header_row))):
             cell.set_text_props(weight='bold', color='white')
             cell.set_facecolor('#4472C4')  # Blue header background
-            
+        
         # Set column widths based on content
         table.auto_set_column_width([i for i in range(len(header_row))])
         
@@ -1476,7 +1554,7 @@ if __name__ == "__main__":
                       "AP_small": 0.001, "AP_medium": 0.001, "AP_large": 0.001
                  },
                   "precision": 0.0, "recall": 0.0, "f1_score": 0.000, "fps": 15.6, # Values from target image
-                  "detection_counts_per_image": None # Test None case for missing data -> should show [0] effectively
+                  "detection_counts_per_image": None # Test None case for missing data -> should show [0]
              },
              "evaluation_metadata": {
                   "timestamp": datetime.now().isoformat(),
