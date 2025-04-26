@@ -31,12 +31,29 @@ VISUALIZATIONS_DIR.mkdir(exist_ok=True, parents=True)
 # *** Add new models and their desired colors here as needed. ***
 # Ensure these keys match the model names used as keys in the evaluation_results_*.json file.
 MODEL_COLORS = {
-    # Updated to match the red color used in target image's FPS/Radar/Scatter/Table
-    'mask-rcnn': '#d62728', # Brick Red 
-    'yolo-seg': '#1f77b4',  # Muted Blue (Changed from red)
-    # Add future models here, e.g.:
-    'dino-seg': '#9467bd', # Muted Purple
-    'Default': '#888888'    # Grey fallback for unlisted models
+    # Enhanced color palette with modern, visually appealing colors
+    'mask-rcnn': '#5D69B1',       # Rich blue
+    'yolo-seg': '#52BCA3',        # Teal
+    'dino-seg': '#99C945',        # Lime green
+    'yolo8n-seg': '#CC61B0',      # Magenta
+    'yolo8s-seg': '#24796C',      # Dark teal
+    'yolo8m-seg': '#DAA51B',      # Golden yellow
+    'yolo8l-seg': '#2F8AC4',      # Sky blue
+    'yolo8x-seg': '#764E9F',      # Purple
+    'yolo9c-seg': '#ED645A',      # Coral
+    'yolo9e-seg': '#CC3A8E',      # Pink
+    'yolo11n-seg': '#A5AA99',     # Sage
+    'yolo11s-seg': '#8DD593',     # Mint green
+    'yolo11m-seg': '#C6DEC7',     # Pale green
+    'yolo11l-seg': '#EAD3E7',     # Lilac
+    'yolo11x-seg': '#F1E6C8',     # Cream
+    'yoloe-11s-seg': '#F3E0A2',   # Pale yellow
+    'yoloe-11m-seg': '#E6C2DC',   # Soft pink
+    'yoloe-11l-seg': '#D5A6BD',   # Rose
+    'yoloe-v8s-seg': '#C9C8F9',   # Lavender
+    'yoloe-v8m-seg': '#9AB5FF',   # Periwinkle
+    'yoloe-v8l-seg': '#5C9AD5',   # Cool blue
+    'Default': '#A0A0A0'          # Neutral gray
 }
 
 def get_model_color(model_name):
@@ -46,6 +63,38 @@ def get_model_color(model_name):
 class MetricsVisualizer:
     """Class to load evaluation results and generate performance visualizations."""
 
+    # Define consistent color scheme for all metrics across all plots
+    # These colors will be used consistently for the same metrics in all charts
+    METRIC_COLORS = {
+        # Main metrics
+        'Precision': '#4C78A8',        # Blue
+        'Recall': '#F58518',           # Orange
+        'F1-Score': '#72B7B2',         # Teal
+        
+        # AP metrics by IoU
+        'mAP (IoU=0.50:0.95)': '#4C78A8',  # Blue (same as Precision)
+        'AP (IoU=0.50)': '#F58518',         # Orange (same as Recall)
+        'AP (IoU=0.75)': '#72B7B2',         # Teal (same as F1-Score)
+        
+        # Object size metrics
+        'Small Objects AP': '#54A24B',     # Green
+        'Small': '#54A24B',                # Green (alias)
+        'Medium Objects AP': '#EECA3B',    # Yellow
+        'Medium': '#EECA3B',               # Yellow (alias)
+        'Large Objects AP': '#B279A2',     # Purple
+        'Large': '#B279A2',                # Purple (alias)
+        
+        # Other metrics
+        'Speed (FPS)': '#FF9DA6',          # Pink
+        'Segm_mAP (IoU=0.50:0.95)': '#4C78A8',  # Blue (same as mAP)
+        'Segm_AP (IoU=0.50)': '#F58518',         # Orange (same as AP@0.50)
+        
+        # Shape metrics
+        'Compactness': '#9D755D',          # Brown
+        'Convexity': '#BAB0AC',            # Gray
+        'Circularity': '#E45756',          # Red
+    }
+    
     def __init__(self, results_file=None, results_dir=None):
         """
         Initialize the visualizer, loading results for all models found.
@@ -450,13 +499,8 @@ class MetricsVisualizer:
         bar_width = 0.25
         index = np.arange(n_models)
 
-        # Colors based on target image legend
-        metric_colors = {
-            'Precision': '#4B0082', # Indigo/Dark Purple
-            'Recall': '#20B2AA',    # Light Sea Green / Teal
-            'F1-Score': '#FFD700'   # Gold / Yellow
-        }
-        colors = [metric_colors.get(metric, plt.cm.viridis(i/n_metrics)) for i, metric in enumerate(df.columns)]
+        # Colors based on target image legend - updated to more vibrant, visually appealing colors
+        colors = [self.METRIC_COLORS.get(metric, '#A0A0A0') for metric in df.columns]
 
         for i, metric in enumerate(df.columns):
             plot_data = pd.to_numeric(df[metric], errors='coerce').fillna(0)
@@ -547,12 +591,8 @@ class MetricsVisualizer:
             'AP (IoU=0.50)': 'AP@0.50',
             'AP (IoU=0.75)': 'AP@0.75'
         }
-        metric_colors = {
-            'mAP (IoU=0.50:0.95)': '#000080', # Navy
-            'AP (IoU=0.50)': '#C71585',       # Medium Violet Red / Pink
-            'AP (IoU=0.75)': '#FFFF00'        # Yellow
-        }
-        colors = [metric_colors.get(metric, plt.cm.plasma(i/n_metrics)) for i, metric in enumerate(df.columns)]
+        # Use our consistent color palette
+        colors = [self.METRIC_COLORS.get(metric, '#A0A0A0') for metric in df.columns]
 
         for i, metric in enumerate(df.columns):
             plot_data = pd.to_numeric(df[metric], errors='coerce').fillna(0)
@@ -632,15 +672,15 @@ class MetricsVisualizer:
             bar_width = 0.25
             index = np.arange(n_models)
             
-            # Use distinct colors for each metric
+            # Use our consistent color palette for shape metrics
             metric_colors = {
-                'Compactness': '#8B4513',  # Brown
-                'Convexity': '#4B0082',    # Indigo
-                'Circularity': '#006400'   # Dark Green
+                'Compactness': self.METRIC_COLORS.get('Precision', '#4C78A8'),    # Blue (same as Precision)
+                'Convexity': self.METRIC_COLORS.get('Recall', '#F58518'),         # Orange (same as Recall)
+                'Circularity': self.METRIC_COLORS.get('F1-Score', '#72B7B2')      # Teal (same as F1-Score)
             }
             
-            colors = [metric_colors.get(metric, plt.cm.tab10(i/n_metrics)) for i, metric in enumerate(metrics_to_plot)]
-            
+            colors = [metric_colors.get(metric, self.METRIC_COLORS.get(metric, '#A0A0A0')) for metric in metrics_to_plot]
+
             # Create bars for each metric
             for i, metric in enumerate(metrics_to_plot):
                 values = data[metric]
@@ -864,7 +904,7 @@ class MetricsVisualizer:
              return
 
         fps_data = self.data['summary_df']['Speed (FPS)']
-        colors = [get_model_color(model) for model in fps_data.index]
+        colors = [self._get_model_color(model) for model in fps_data.index]
         rects = ax.bar(fps_data.index, fps_data, color=colors)
 
         ax.set_ylabel('Frames Per Second')
@@ -926,7 +966,7 @@ class MetricsVisualizer:
             # Values are large enough to show directly
             df = orig_df.copy()
             scaled = False
-            
+
         # Prepare the plot
         n_models = len(df)
         bar_width = 0.25
@@ -939,19 +979,21 @@ class MetricsVisualizer:
             'Large Objects AP': 'Large'
         }
         
-        # Use a distinct color scheme for object sizes
+        # Use consistent color palette from Precision/Recall/F1-Score chart
         size_colors = {
-            'Small Objects AP': '#ff9896',  # Light red
-            'Medium Objects AP': '#aec7e8', # Light blue
-            'Large Objects AP': '#98df8a'   # Light green
+            'Small Objects AP': self.METRIC_COLORS.get('Precision', '#4C78A8'),    # Blue (same as Precision)
+            'Medium Objects AP': self.METRIC_COLORS.get('Recall', '#F58518'),      # Orange (same as Recall)
+            'Large Objects AP': self.METRIC_COLORS.get('F1-Score', '#72B7B2')      # Teal (same as F1-Score)
         }
         
+        colors = [size_colors.get(size, self.METRIC_COLORS.get(size, '#A0A0A0')) for size in available_size_metrics]
+
         # Plot each size category
         for i, size in enumerate(available_size_metrics):
             values = df[size]
             rects = ax.bar(index + i * bar_width, values, bar_width,
                           label=legend_labels.get(size, size),
-                          color=size_colors.get(size, plt.cm.tab10(i/len(available_size_metrics))))
+                          color=colors[i])
 
             # Add data labels on bars using original values
             orig_values = orig_df[size]
@@ -1045,7 +1087,7 @@ class MetricsVisualizer:
                           alpha=0.7, # Semi-transparent
                           edgecolors='black',
                           linewidths=1)
-        
+
         # Label each point with model name and actual F1-Score value
         for i, model in enumerate(models):
             # Format label based on original F1 value
@@ -1159,7 +1201,7 @@ class MetricsVisualizer:
             else:
                 # For accuracy metrics - relative maximum approach with enhanced visibility
                 if max_val < 0.01 and max_val > 0:
-                    # Very small values get "zoomed in" - the highest value becomes 0.8
+                    # Zoomed in - the highest value becomes 0.8
                     # and all others are scaled proportionally
                     zoomed_metrics.append(display_name)
                     
@@ -1263,7 +1305,7 @@ class MetricsVisualizer:
             colormap = plt.cm.tab20(np.linspace(0, 1, len(models_to_plot)))
         else:
             # For fewer models, use distinct colors
-            colormap = [get_model_color(model) for model in models_to_plot]
+            colormap = [self._get_model_color(model) for model in models_to_plot]
         
         for i, model in enumerate(models_to_plot):
             data = df_radar.loc[model].tolist()
@@ -1630,5 +1672,8 @@ if __name__ == "__main__":
         print("\nVisualizer could not load results. Cannot run visualization tests.")
 
     print(f"--- MetricsVisualizer Test Block Finished ---")
+
+
+
 
 
