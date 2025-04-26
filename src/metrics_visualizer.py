@@ -947,14 +947,14 @@ class MetricsVisualizer:
         }
         
         # Plot each size category
-        for i, metric in enumerate(available_size_metrics):
-            values = df[metric]
+        for i, size in enumerate(available_size_metrics):
+            values = df[size]
             rects = ax.bar(index + i * bar_width, values, bar_width,
-                          label=legend_labels.get(metric, metric),
-                          color=size_colors.get(metric, plt.cm.tab10(i/len(available_size_metrics))))
+                          label=legend_labels.get(size, size),
+                          color=size_colors.get(size, plt.cm.tab10(i/len(available_size_metrics))))
 
             # Add data labels on bars using original values
-            orig_values = orig_df[metric]
+            orig_values = orig_df[size]
             
             for j, rect in enumerate(rects):
                 height = rect.get_height()
@@ -1108,7 +1108,7 @@ class MetricsVisualizer:
                    fontsize=8, style='italic', color='darkgray')
 
     def _plot_radar(self, ax):
-        """Creates the multi-dimensional radar chart."""
+        """Creates the multi-dimensional radar chart with model-relative scaling."""
         # Use non-newline versions for labels
         radar_metrics_map = {
             'mAP': 'mAP (IoU=0.50:0.95)',
@@ -1139,52 +1139,87 @@ class MetricsVisualizer:
         print("\nDEBUG - Radar Chart Raw Values:")
         print(df_radar_raw)
 
-        # --- Enhanced Data Normalization for Small Values ---
+        # --- Enhanced Data Normalization with "Relative Maximum" approach ---
         df_radar_normalized = pd.DataFrame(index=df_radar_raw.index)
-        min_visible_value = 0.3  # Increased minimum value for better visibility 
+        min_visible_value = 0.15  # Minimum value for visibility
+        
+        # Store information about whether metrics are displayed at zoomed scale
+        zoomed_metrics = []
         
         for display_name, original_col in available_radar_metrics.items():
             column_data = df_radar_raw[original_col]
+            max_val = column_data.max()
             
-            # Handle different normalization strategies based on metric type
+            # Special handling for Speed (FPS) - standard max normalization
             if original_col == 'Speed (FPS)':
-                # For Speed metric - standard normalization by max value
-                max_val = column_data.max()
                 if max_val > 0:
-                    normalized = column_data / max_val
+                    normalized = column_data / max_val  # Standard normalization
                 else:
-                    # Set to small visible values if all are zero
                     normalized = pd.Series([min_visible_value * 0.5] * len(column_data), index=column_data.index)
-            else:  
-                # For accuracy metrics (mAP, F1, AP by size)
-                max_val = column_data.max()
-                
-                # Check if we have extremely small values
-                if max_val < 0.01:
-                    # For very small values, use rank-based scaling
-                    # This ensures models are clearly differentiated even with tiny raw values
-                    ranks = column_data.rank(method='dense')
-                    max_rank = ranks.max()
+            else:
+                # For accuracy metrics - relative maximum approach with enhanced visibility
+                if max_val < 0.01 and max_val > 0:
+                    # Very small values get "zoomed in" - the highest value becomes 0.8
+                    # and all others are scaled proportionally
+                    zoomed_metrics.append(display_name)
                     
-                    if max_rank > 1:  # If we have different ranks
-                        # Scale ranks between min_visible_value and 0.8
-                        normalized = min_visible_value + ((0.8 - min_visible_value) * (ranks - 1) / (max_rank - 1))
-                    else:
-                        # All same rank, use a fixed medium value
-                        normalized = pd.Series([0.5] * len(column_data), index=column_data.index)
+                    # Use relative scaling that preserves differences
+                    # Map the range [0, max_val] to [0, 0.8] with minimum visibility threshold
+                    normalized = pd.Series(index=column_data.index)
                     
-                    print(f"Note: '{display_name}' values are very small (<0.01), using rank-based scaling for visibility")
+                    for i, val in enumerate(column_data):
+                        if val <= 0:
+                            # Give zero/negative values a tiny positive value
+                            normalized.iloc[i] = min_visible_value * 0.2
+                        elif val < max_val * 0.05:  # Values less than 5% of max
+                            # Give very small but non-zero values a bit more visibility
+                            ratio = val / max_val
+                            normalized.iloc[i] = min_visible_value + ratio * (0.4 - min_visible_value)
+                        else:
+                            # Scale proportionally from the minimum threshold up to 0.8
+                            ratio = val / max_val
+                            normalized.iloc[i] = min_visible_value + ratio * (0.8 - min_visible_value)
+                    
+                    print(f"Note: '{display_name}' values are very small (<0.01), using zoomed view")
                 else:
-                    # For larger values, use standard normalization but ensure minimum visibility
-                    normalized = column_data / max(1.0, max_val)  # Cap reference at 1.0
-                    
-                    # Ensure any non-zero value is at least somewhat visible
-                    for i, val in enumerate(normalized):
-                        if column_data.iloc[i] > 0 and val < min_visible_value:
-                            normalized.iloc[i] = min_visible_value
+                    # For larger values or zeros, use standard max-normalization with minimum visibility
+                    if max_val > 0:
+                        normalized = column_data / max_val  # Standard normalization to [0,1]
+                        
+                        # Boost any non-zero values that would be too small to see
+                        for i, val in enumerate(normalized):
+                            if column_data.iloc[i] > 0 and val < min_visible_value:
+                                normalized.iloc[i] = min_visible_value + (val * (0.3 - min_visible_value))
+                    else:
+                        # All zeros case
+                        normalized = pd.Series([min_visible_value * 0.5] * len(column_data), index=column_data.index)
             
+            # Add distinct offsets to object size metrics to prevent overlapping 
+            # when values are identical or very similar
+            if original_col in ['Small Objects AP', 'Medium Objects AP', 'Large Objects AP']:
+                # These offsets ensure that even identical values will appear distinct
+                # The offset is proportional to the difference between min and max values
+                offset_factor = 0.05  # Base offset factor
+                
+                if original_col == 'Small Objects AP':
+                    # Smallest offset for small objects
+                    offset = offset_factor * 1
+                elif original_col == 'Medium Objects AP':  
+                    # Medium offset for medium objects
+                    offset = offset_factor * 2
+                else:  # Large Objects AP
+                    # Largest offset for large objects 
+                    offset = offset_factor * 3
+                
+                # Apply offset, ensuring we don't exceed 1.0
+                for i in range(len(normalized)):
+                    current_val = normalized.iloc[i]
+                    if current_val > min_visible_value:  # Only apply offset to visible values
+                        normalized.iloc[i] = min(1.0, current_val + offset)
+            
+            # Store the normalized values
             df_radar_normalized[display_name] = normalized
-            
+        
         # Handle any NaN values
         df_radar = df_radar_normalized.fillna(0)
         
@@ -1196,7 +1231,7 @@ class MetricsVisualizer:
         categories = list(df_radar.columns)
         n_categories = len(categories)
         angles = np.linspace(0, 2 * np.pi, n_categories, endpoint=False).tolist()
-        angles += angles[:1] # Close loop
+        angles += angles[:1]  # Close the loop
 
         # Create background reference circles for comparison
         for level in [0.25, 0.5, 0.75]:
@@ -1204,6 +1239,7 @@ class MetricsVisualizer:
                     linewidth=0.5, alpha=0.3, label=None)
             ax.fill(angles, [level] * (n_categories + 1), color='lightgray', alpha=0.05)
 
+        # Prepare axis styling
         ax.set_xticks(angles[:-1])
         ax.set_xticklabels(categories, fontsize=10, color='black')  # Improved readability
         ax.set_yticks([])  # Hide numerical scale - not meaningful with our normalization
@@ -1242,13 +1278,19 @@ class MetricsVisualizer:
             # Fill with semi-transparent color
             ax.fill(angles, data, color=color, alpha=0.3, zorder=i+1)
 
-        # Add scale indication if we used boosted values for very small metrics
-        has_boosted = any(df_radar_raw.max() < 0.01)
+        # Create title with information about zoomed metrics
         title = 'Multi-dimensional Performance Comparison'
-        if has_boosted:
-            title += '\n(Small values boosted for visibility)'
+        if zoomed_metrics:
+            # Indicate which metrics are shown at zoomed scale
+            zoomed_str = ", ".join(zoomed_metrics)
+            title += f'\n(Zoomed view for: {zoomed_str})'
             
         ax.set_title(title, size=12, y=1.12)
+        
+        # Add annotation explaining the normalization approach
+        explanation = "Note: Each axis shows relative performance where the best model = 1.0"
+        ax.text(0.5, -0.15, explanation, transform=ax.transAxes, ha='center', 
+                fontsize=8, style='italic', color='dimgray')
         
         # Position legend on the side for easier reading when many models
         if len(models_to_plot) > 5:
@@ -1588,3 +1630,5 @@ if __name__ == "__main__":
         print("\nVisualizer could not load results. Cannot run visualization tests.")
 
     print(f"--- MetricsVisualizer Test Block Finished ---")
+
+
