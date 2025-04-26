@@ -821,8 +821,21 @@ def main():
     # Filter models if specified
     models_to_evaluate = MODELS_TO_EVALUATE
     if args.models:
-        models_to_evaluate = [m for m in MODELS_TO_EVALUATE if m["type"] in args.models]
+        # Check if more than 3 models were selected
+        if len(args.models) > 3:
+            print(f"Warning: You selected {len(args.models)} models, but there is a limit of 3 models per evaluation.")
+            print(f"Only the first 3 models will be evaluated: {', '.join(args.models[:3])}")
+            selected_models = args.models[:3]  # Limit to first 3 models
+        else:
+            selected_models = args.models
+            
+        models_to_evaluate = [m for m in MODELS_TO_EVALUATE if m["type"] in selected_models]
         print(f"Evaluating selected models: {', '.join([m['type'] for m in models_to_evaluate])}")
+    # Enforce the 3-model limit even if no specific models were selected
+    elif len(models_to_evaluate) > 3:
+        print(f"Note: Limiting evaluation to 3 models as per current settings.")
+        print(f"Selected models: {', '.join([m['type'] for m in models_to_evaluate[:3]])}")
+        models_to_evaluate = models_to_evaluate[:3]
 
     # Add confidence and IoU thresholds to model configs
     for model_config in models_to_evaluate:
