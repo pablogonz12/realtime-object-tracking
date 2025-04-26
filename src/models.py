@@ -186,17 +186,21 @@ def _download_model_if_needed(model_path: Path, model_key: str):
 class YOLOWrapper:
     """Wrapper for YOLO model inference using the Ultralytics library."""
 
-    def __init__(self, model_path_or_name):
+    def __init__(self, model_path_or_name, conf_threshold=0.25, iou_threshold=0.45):
         """
         Initializes the YOLO model wrapper. Handles both detection and segmentation models.
         Relies on the ultralytics YOLO() constructor for loading and potential auto-download.
 
         Args:
             model_path_or_name (str or Path): Path or name of the YOLO model weights file (.pt).
+            conf_threshold (float): Confidence threshold for detections (default: 0.25)
+            iou_threshold (float): IoU threshold for NMS (default: 0.45)
         """
         self.input_model_identifier = str(model_path_or_name) # Store the input identifier as string
         self.model = None
         self.model_path = None # Will be set after successful loading
+        self.conf_threshold = conf_threshold
+        self.iou_threshold = iou_threshold
 
         # Determine device (cuda or cpu)
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -205,6 +209,7 @@ class YOLOWrapper:
         # Determine model type name for logging
         self.model_type_name = Path(self.input_model_identifier).stem
         print(f"Attempting to load YOLO model using identifier: {self.input_model_identifier}")
+        print(f"Using conf_threshold={self.conf_threshold}, iou_threshold={self.iou_threshold}")
 
         try:
             from ultralytics import YOLO # Import here to avoid dependency if not used
@@ -269,8 +274,11 @@ class YOLOWrapper:
             # Start timing
             start_time = time.time()
             
-            # Perform prediction
-            results = self.model(frame, verbose=False) # verbose=False reduces console spam
+            # Perform prediction with explicit confidence and IoU thresholds
+            results = self.model(frame, 
+                                verbose=False,  # verbose=False reduces console spam
+                                conf=self.conf_threshold,  # Apply confidence threshold
+                                iou=self.iou_threshold)    # Apply IoU threshold
             
             inference_time = time.time() - start_time
             postprocess_start = time.time()
@@ -281,32 +289,68 @@ class YOLOWrapper:
             # Create a copy of the frame for annotation
             annotated_frame = results[0].plot()
 
-            # Extract detection details (optional, as plot() already visualizes)
+            # Extract detection details
             for result in results:
                 boxes = result.boxes
                 names = result.names # Class names mapping
+                
+                # Debug class mapping
+                if len(boxes) > 0 and not hasattr(self, '_printed_class_map'):
+                    sample_classes = list(result.names.items())[:5] if result.names else []
+                    print(f"YOLO class mapping sample (first 5): {sample_classes}")
+                    self._printed_class_map = True
+                
                 for i in range(len(boxes)):
                     box = boxes[i]
                     x1, y1, x2, y2 = map(int, box.xyxy[0])
-                    # CRITICAL FIX: Convert YOLO's 0-indexed class IDs to COCO's 1-indexed class IDs
+                    
+                    # Get YOLO's class ID (0-indexed)
                     yolo_class_id = int(box.cls[0])
-                    class_id = yolo_class_id + 1  # Add 1 to convert from 0-indexed to 1-indexed
+                    
+                    # CRITICAL FIX: Map YOLO's 0-indexed class IDs to COCO's 1-indexed class IDs
+                    # COCO class IDs start at 1, with 1=person, 2=bicycle, etc.
+                    # The +1 adjustment converts from YOLO's 0-based indexing to COCO's 1-based indexing
+                    coco_class_id = yolo_class_id + 1
+                    
                     score = float(box.conf[0])
-                    class_name = names.get(yolo_class_id, f"ID:{yolo_class_id}") # Get name or use ID
+                    class_name = names.get(yolo_class_id, f"ID:{yolo_class_id}")
+                    
                     detections.append({
                         "box": [x1, y1, x2, y2],
-                        "class_id": class_id,  # Use the adjusted class_id
+                        "class_id": coco_class_id,  # Use the COCO 1-indexed class ID 
                         "class_name": class_name,
                         "score": score
                     })
 
-                # Extract segmentation masks if available (e.g., for yolov8n-seg.pt)
+                # Extract segmentation masks if available
                 if result.masks is not None:
-                    # Convert masks to numpy arrays (ensure they are boolean or uint8)
-                    for mask_tensor in result.masks.data:
-                        # Mask tensor is usually float, convert to boolean or uint8
-                        mask_np = mask_tensor.cpu().numpy().astype(np.uint8) * 255 # Or bool
-                        segmentations.append(mask_np)
+                    try:
+                        masks_data = result.masks.data
+                        masks_shape = masks_data.shape
+                        
+                        # Process each mask
+                        for i, mask_tensor in enumerate(masks_data):
+                            # Convert mask tensor to numpy array and ensure it's binary
+                            mask_np = mask_tensor.cpu().numpy()
+                            
+                            # Make sure mask is properly formatted for evaluation
+                            # Ensure mask is binary (0/1) or (0/255) for visualization
+                            binary_mask = (mask_np > 0.5).astype(np.uint8) * 255
+                            
+                            # Resize mask to match original image dimensions if needed
+                            img_h, img_w = frame.shape[:2]
+                            mask_h, mask_w = binary_mask.shape[:2]
+                            
+                            if mask_h != img_h or mask_w != img_w:
+                                binary_mask = cv2.resize(binary_mask, (img_w, img_h), 
+                                                         interpolation=cv2.INTER_NEAREST)
+                            
+                            segmentations.append(binary_mask)
+                    
+                    except Exception as mask_error:
+                        print(f"Error processing masks: {mask_error}")
+                        # Continue with bounding boxes only if mask processing fails
+                        pass
             
             postprocess_time = time.time() - postprocess_start
             total_time = time.time() - start_time
@@ -314,11 +358,6 @@ class YOLOWrapper:
             # Display timing information on frame
             cv2.putText(annotated_frame, f"FPS: {1/total_time:.1f}", (10, 30),
                        cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
-            
-            # Add detailed timing report to console
-            print(f"YOLO ({self.model_type_name}) timing: Total={total_time:.3f}s (FPS: {1/total_time:.1f}) | " 
-                  f"Inference={inference_time:.3f}s | Postprocess={postprocess_time:.3f}s | "
-                  f"Detections={len(detections)} | Segmentations={len(segmentations)}")
 
             return detections, segmentations, annotated_frame
             
@@ -509,7 +548,7 @@ class MaskRCNNWrapper:
 class ModelManager:
     """Manages loading and accessing different computer vision models."""
 
-    def __init__(self, model_type, model_path=None, config_path=None):
+    def __init__(self, model_type, model_path=None, config_path=None, conf_threshold=0.25, iou_threshold=0.45):
         """
         Initializes the appropriate model wrapper based on the model type.
 
@@ -518,9 +557,15 @@ class ModelManager:
             model_path (str or Path, optional): Path to the model weights file.
                                                 If None, uses default path for the type.
             config_path (str, optional): Path to the configuration file (not used currently).
+            conf_threshold (float): Confidence threshold for detections (default: 0.25)
+            iou_threshold (float): IoU threshold for NMS (default: 0.45)
         """
         self.model_type = model_type.lower()
         self.config_path = config_path # Store config path
+        self.conf_threshold = conf_threshold
+        self.iou_threshold = iou_threshold
+        
+        print(f"ModelManager: Using conf_threshold={self.conf_threshold}, iou_threshold={self.iou_threshold}")
 
         # Determine model path: Use provided path or default for the type
         self.model_path = Path(model_path) if model_path else DEFAULT_MODEL_PATHS.get(self.model_type)
@@ -607,7 +652,9 @@ class ModelManager:
             elif 'yolo' in self.model_type.lower():
                 # Handle all YOLO segmentation variants regardless of naming convention
                 print(f"Loading YOLO model from: {self.model_path}")
-                return YOLOWrapper(self.model_path)
+                return YOLOWrapper(self.model_path, 
+                                   conf_threshold=self.conf_threshold,
+                                   iou_threshold=self.iou_threshold)
                 
             else:
                 print(f"Error: Unsupported model type: {self.model_type}")

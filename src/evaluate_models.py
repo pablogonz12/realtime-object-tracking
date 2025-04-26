@@ -184,11 +184,17 @@ class ModelEvaluator:
         model_path = model_config["path"]
         config_path = model_config["config"]
         
-        print(f"\nEvaluating {model_type.upper()} model...")
+        # Get confidence and IoU thresholds from model_config or use defaults
+        conf_threshold = model_config.get("conf_threshold", 0.25)
+        iou_threshold = model_config.get("iou_threshold", 0.45)
         
-        # Initialize the model
+        print(f"\nEvaluating {model_type.upper()} model with conf_threshold={conf_threshold}, iou_threshold={iou_threshold}...")
+        
+        # Initialize the model with proper thresholds
         try:
-            model_manager = ModelManager(model_type, model_path, config_path)
+            model_manager = ModelManager(model_type, model_path, config_path, 
+                                         conf_threshold=conf_threshold, 
+                                         iou_threshold=iou_threshold)
             if model_manager.model_wrapper is None:
                 print(f"Error: Failed to initialize {model_type} model")
                 return None
@@ -786,7 +792,7 @@ def main():
     # Parse command line arguments
     parser = argparse.ArgumentParser(description="Evaluate computer vision models on COCO validation set")
     parser.add_argument("--images", type=int, default=50,
-                        help=f"Number of COCO val2017 images to use (max {COCO_VAL_TOTAL_IMAGES}, default: 50)")
+                        help=f"Number of COCO val2017 images to use (max {COCO_VAL_TOTAL_IMAGES}, default: 250). Increase to 200+ for more reliable mAP metrics.")
     parser.add_argument("--no-vis", action="store_true",
                         help="Skip saving individual detection visualizations (dashboard will still be generated)")
     
@@ -794,6 +800,14 @@ def main():
     model_choices = list(DEFAULT_MODEL_PATHS.keys())
     parser.add_argument("--models", type=str, nargs="+", choices=model_choices,
                         help="Specific models to evaluate (default: all)")
+    
+    # Add new argument for confidence threshold
+    parser.add_argument("--conf-threshold", type=float, default=0.25,
+                        help="Confidence threshold for detections (default: 0.25)")
+    
+    # Add new argument for IoU threshold
+    parser.add_argument("--iou-threshold", type=float, default=0.45,
+                        help="IoU threshold for NMS (default: 0.45)")
     
     args = parser.parse_args()
     
@@ -809,6 +823,11 @@ def main():
     if args.models:
         models_to_evaluate = [m for m in MODELS_TO_EVALUATE if m["type"] in args.models]
         print(f"Evaluating selected models: {', '.join([m['type'] for m in models_to_evaluate])}")
+
+    # Add confidence and IoU thresholds to model configs
+    for model_config in models_to_evaluate:
+        model_config["conf_threshold"] = args.conf_threshold
+        model_config["iou_threshold"] = args.iou_threshold
 
     print("Starting model evaluation...")
 
