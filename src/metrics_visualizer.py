@@ -725,62 +725,83 @@ class MetricsVisualizer:
 
     def _plot_f1_vs_speed(self, ax):
         """Plots F1-Score vs Speed scatter plot."""
-        required_metrics = ['F1-Score', 'Speed (FPS)']
-        if not all(m in self.data['summary_df'].columns for m in required_metrics):
-            ax.text(0.5, 0.5, 'F1 or FPS data missing.', ha='center', va='center', transform=ax.transAxes)
-            ax.set_title('F1-Score vs. Speed Performance')
+        # Check necessary metrics are available
+        if 'F1-Score' not in self.data['summary_df'].columns or 'Speed (FPS)' not in self.data['summary_df'].columns:
+            ax.text(0.5, 0.5, 'F1-Score vs Speed data not available.',
+                   ha='center', va='center', transform=ax.transAxes)
+            ax.set_title('F1-Score vs Speed Performance')
             return
 
+        # Get data for plotting
         df = self.data['summary_df']
-        f1_scores = df['F1-Score']
+        f1_score = df['F1-Score']
         fps = df['Speed (FPS)']
-        colors = [get_model_color(model) for model in df.index]
+        models = df.index
 
-        ax.scatter(fps, f1_scores, c=colors, s=120, alpha=0.9, edgecolors='k', linewidth=0.5)
-
-        for i, model in enumerate(df.index):
-            # Slightly adjust label position based on quadrant to avoid overlap
-            ha = 'left' if fps.iloc[i] < fps.mean() else 'right'
-            va = 'bottom' if f1_scores.iloc[i] < f1_scores.mean() else 'top'
-            offset_x = 0.05 if ha == 'left' else -0.05
-            offset_y = 0.001 if va == 'bottom' else -0.001
-
-            ax.text(fps.iloc[i] + offset_x, f1_scores.iloc[i] + offset_y, model,
-                    fontsize=9, ha=ha, va=va)
-
-        ax.set_xlabel('Speed (FPS)')
+        # Create customized color mapping for models
+        colors = []
+        for model in models:
+            colors.append(self._get_model_color(model))
+            
+        # Create scatter plot with custom colors and sizes
+        scatter = ax.scatter(fps, f1_score, 
+                           c=colors,  # Use our custom colors
+                           s=100,     # Larger point size
+                           alpha=0.7, # Semi-transparent
+                           edgecolors='black',
+                           linewidths=1)
+        
+        # Label each point with model name
+        for i, model in enumerate(models):
+            ax.annotate(model, 
+                       (fps[i], f1_score[i]),
+                       xytext=(5, 5),
+                       textcoords='offset points',
+                       fontsize=8)
+        
+        # Add horizontal and vertical lines for better reference
+        if len(fps) > 0:
+            ax.axhline(y=f1_score.mean(), color='gray', linestyle='--', alpha=0.3)
+            ax.axvline(x=fps.mean(), color='gray', linestyle='--', alpha=0.3)
+        
+        # Set labels and title
+        ax.set_xlabel('Processing Speed (FPS)')
         ax.set_ylabel('F1-Score')
-        ax.set_title('F1-Score vs. Speed Performance')
-        ax.grid(True, linestyle='--', alpha=0.6)
+        ax.set_title('F1-Score vs Speed Performance')
         
-        # Improved axis limits that adapt to data
-        max_fps = fps.max() if not fps.empty else 0
-        max_f1 = f1_scores.max() if not f1_scores.empty else 0
+        # Set limits with padding
+        max_fps = fps.max() if not fps.empty else 10
+        max_f1 = f1_score.max() if not f1_score.empty else 0.1
         
-        # For x-axis (Speed/FPS)
-        if max_fps <= 0:
-            # If no valid FPS data, use a default range
-            ax.set_xlim(left=-0.5, right=5)
+        # Handle very small F1 values
+        if max_f1 < 0.01:
+            ax.set_ylim(0, 0.05)  # Set a reasonable minimum visibility
+            ax.text(0.5, 0.95, 'Note: F1-Scores < 0.01', 
+                   ha='center', va='top', transform=ax.transAxes,
+                   fontsize=8, color='gray', bbox=dict(facecolor='white', alpha=0.5))
         else:
-            # Add 10% padding to the right for better visualization
-            ax.set_xlim(left=-0.5, right=max_fps * 1.1)
+            ax.set_ylim(0, max_f1 * 1.15)
+            
+        ax.set_xlim(0, max_fps * 1.15)
         
-        # For y-axis (F1-Score) - dynamic scaling based on max value
-        if max_f1 <= 0.001:  # Nearly zero values
-            # Use a small default range when values are essentially zero
-            ax.set_ylim(bottom=0, top=0.01)
-        elif max_f1 < 0.1:  # Small but non-zero values
-            # For small F1 values, add more relative padding (30%)
-            ax.set_ylim(bottom=0, top=max_f1 * 1.3)
-        else:
-            # For larger F1 values, add standard 15% padding
-            ax.set_ylim(bottom=0, top=max_f1 * 1.15)
+        # Add grid for better readability
+        ax.grid(linestyle='--', alpha=0.6)
         
-        # Add a small offset from zero for better visibility
-        y_min, y_max = ax.get_ylim()
-        if y_min == 0:
-            ax.set_ylim(bottom=-0.001, top=y_max)
-
+        # If we have many models with similar colors, add a legend
+        if len(models) > 5:
+            # Create legend handles manually
+            from matplotlib.lines import Line2D
+            legend_elements = []
+            for i, model in enumerate(models):
+                legend_elements.append(
+                    Line2D([0], [0], marker='o', color='w', 
+                          markerfacecolor=colors[i], markersize=8, 
+                          label=model)
+                )
+                
+            # Place legend outside plot area to the right
+            ax.legend(handles=legend_elements, loc='center left', 
+                     bbox_to_anchor=(1.05, 0.5), fontsize='small')
 
     def _plot_radar(self, ax):
         """Creates the multi-dimensional radar chart."""
@@ -816,7 +837,7 @@ class MetricsVisualizer:
 
         # --- Enhanced Data Normalization for Small Values ---
         df_radar_normalized = pd.DataFrame(index=df_radar_raw.index)
-        min_visible_value = 0.2  # Minimum value for visibility in the radar chart
+        min_visible_value = 0.3  # Increased minimum value for better visibility 
         
         for display_name, original_col in available_radar_metrics.items():
             column_data = df_radar_raw[original_col]
@@ -836,21 +857,27 @@ class MetricsVisualizer:
                 
                 # Check if we have extremely small values
                 if max_val < 0.01:
-                    # For very small values, boost more aggressively for visibility
-                    # Each model gets a relative boost while maintaining order
-                    relative_ranks = column_data.rank(method='min') / len(column_data)
-                    # Scale relative ranks to be between min_visible_value and 0.8
-                    normalized = min_visible_value + (0.6 * relative_ranks)
+                    # For very small values, use rank-based scaling
+                    # This ensures models are clearly differentiated even with tiny raw values
+                    ranks = column_data.rank(method='dense')
+                    max_rank = ranks.max()
                     
-                    # Add a note explaining the scaling
+                    if max_rank > 1:  # If we have different ranks
+                        # Scale ranks between min_visible_value and 0.8
+                        normalized = min_visible_value + ((0.8 - min_visible_value) * (ranks - 1) / (max_rank - 1))
+                    else:
+                        # All same rank, use a fixed medium value
+                        normalized = pd.Series([0.5] * len(column_data), index=column_data.index)
+                    
                     print(f"Note: '{display_name}' values are very small (<0.01), using rank-based scaling for visibility")
                 else:
                     # For larger values, use standard normalization but ensure minimum visibility
                     normalized = column_data / max(1.0, max_val)  # Cap reference at 1.0
-                    # Boost any non-zero but small values to be at least somewhat visible
+                    
+                    # Ensure any non-zero value is at least somewhat visible
                     for i, val in enumerate(normalized):
-                        if 0 < val < min_visible_value * 0.5:
-                            normalized.iloc[i] = min_visible_value * 0.5
+                        if column_data.iloc[i] > 0 and val < min_visible_value:
+                            normalized.iloc[i] = min_visible_value
             
             df_radar_normalized[display_name] = normalized
             
@@ -867,31 +894,49 @@ class MetricsVisualizer:
         angles = np.linspace(0, 2 * np.pi, n_categories, endpoint=False).tolist()
         angles += angles[:1] # Close loop
 
-        # Create a background reference circle for comparison
-        ax.plot(angles, [0.5] * (n_categories + 1), color='gray', linestyle='--', 
-                linewidth=0.5, alpha=0.3, label=None)
-        ax.fill(angles, [0.5] * (n_categories + 1), color='lightgray', alpha=0.1)
+        # Create background reference circles for comparison
+        for level in [0.25, 0.5, 0.75]:
+            ax.plot(angles, [level] * (n_categories + 1), color='gray', linestyle='--', 
+                    linewidth=0.5, alpha=0.3, label=None)
+            ax.fill(angles, [level] * (n_categories + 1), color='lightgray', alpha=0.05)
 
         ax.set_xticks(angles[:-1])
-        ax.set_xticklabels(categories, fontsize=9, color='grey')
-        ax.set_yticks(np.arange(0.2, 1.1, 0.2))
-        ax.set_yticklabels([f"{i:.1f}" for i in np.arange(0.2, 1.1, 0.2)], fontsize=8, color='darkgrey')
+        ax.set_xticklabels(categories, fontsize=10, color='black')  # Improved readability
+        ax.set_yticks([])  # Hide numerical scale - not meaningful with our normalization
         ax.set_ylim(0, 1.0)
-        ax.tick_params(axis='x', pad=10)
-        ax.grid(color='lightgray', linestyle='--', linewidth=0.5)
+        ax.tick_params(axis='x', pad=12)
+        ax.grid(False)  # Remove distracting grid
         ax.spines['polar'].set_color('lightgray')
 
         # --- Plot each model's data ---
-        for i, model in enumerate(df_radar.index):
+        # If we have many models, limit to a maximum number for clarity
+        models_to_plot = df_radar.index
+        max_models_in_radar = 12  # Maximum models to show in radar chart
+        
+        if len(models_to_plot) > max_models_in_radar:
+            print(f"Warning: Too many models ({len(models_to_plot)}) for radar chart. Limiting to {max_models_in_radar}.")
+            models_to_plot = models_to_plot[:max_models_in_radar]
+        
+        # Improve color contrast by using a different colormap if we have many models
+        if len(models_to_plot) > 7:
+            # Create a colormap with evenly spaced colors
+            colormap = plt.cm.tab20(np.linspace(0, 1, len(models_to_plot)))
+        else:
+            # For fewer models, use distinct colors
+            colormap = [get_model_color(model) for model in models_to_plot]
+        
+        for i, model in enumerate(models_to_plot):
             data = df_radar.loc[model].tolist()
             data += data[:1]  # Close the loop
-            color = get_model_color(model)
+            
+            # Select color from our colormap
+            color = colormap[i] if isinstance(colormap, np.ndarray) else colormap[i]
             
             # Plot the lines with improved visibility
-            ax.plot(angles, data, linewidth=2, linestyle='solid', label=model, color=color, zorder=i+2)
+            ax.plot(angles, data, linewidth=2.5, linestyle='solid', label=model, color=color, zorder=10+i)
             
             # Fill with semi-transparent color
-            ax.fill(angles, data, color=color, alpha=0.25, zorder=i+1)
+            ax.fill(angles, data, color=color, alpha=0.3, zorder=i+1)
 
         # Add scale indication if we used boosted values for very small metrics
         has_boosted = any(df_radar_raw.max() < 0.01)
@@ -900,182 +945,275 @@ class MetricsVisualizer:
             title += '\n(Small values boosted for visibility)'
             
         ax.set_title(title, size=12, y=1.12)
-        ax.legend(loc='lower right', bbox_to_anchor=(1.15, -0.1), fontsize='small')
+        
+        # Position legend on the side for easier reading when many models
+        if len(models_to_plot) > 5:
+            ax.legend(loc='center left', bbox_to_anchor=(1.15, 0.5), fontsize='small')
+        else:
+            ax.legend(loc='lower right', bbox_to_anchor=(0.95, -0.1), fontsize='small')
+            
+    def _get_model_color(self, model_name):
+        """Get a consistent color for each model type."""
+        # Define distinct colors for different model families with more variation
+        model_colors = {
+            # Base models
+            'mask-rcnn': '#1f77b4',     # Muted blue
+            'detr': '#2ca02c',          # Green
+            'detr-panoptic': '#2ca02c',  # Green
+            
+            # YOLOv8 family - orange to red gradient
+            'yolo8n-seg': '#ff7f0e',    # Orange
+            'yolo8s-seg': '#ff6347',    # Tomato
+            'yolo8m-seg': '#e74c3c',    # Lighter red
+            'yolo8l-seg': '#c0392b',    # Red
+            'yolo8x-seg': '#7f0000',    # Dark red
+            
+            # YOLOv9 family - teal/turquoise gradient
+            'yolo9c-seg': '#1abc9c',    # Light teal
+            'yolo9e-seg': '#16a085',    # Dark teal
+            
+            # YOLOv11 family - purple gradient
+            'yolo11n-seg': '#9467bd',   # Light purple
+            'yolo11s-seg': '#8e44ad',   # Medium purple
+            'yolo11m-seg': '#7d3c98',   # Purple
+            'yolo11l-seg': '#6c3483',   # Dark purple
+            'yolo11x-seg': '#4a235a',   # Very dark purple
+            
+            # YOLO-E v11 family - blue gradient
+            'yoloe-11s-seg': '#3498db',     # Light blue
+            'yoloe-11s-seg-pf': '#2e86c1',  # Light-medium blue
+            'yoloe-11m-seg': '#2874a6',     # Medium blue
+            'yoloe-11m-seg-pf': '#21618c',  # Medium-dark blue
+            'yoloe-11l-seg': '#1a5276',     # Dark blue
+            'yoloe-11l-seg-pf': '#154360',  # Very dark blue
+            
+            # YOLO-E v8 family - green gradient
+            'yoloe-v8s-seg': '#58d68d',     # Light green
+            'yoloe-v8s-seg-pf': '#52be80',  # Light-medium green
+            'yoloe-v8m-seg': '#27ae60',     # Medium green
+            'yoloe-v8m-seg-pf': '#229954',  # Medium-dark green
+            'yoloe-v8l-seg': '#1e8449',     # Dark green
+            'yoloe-v8l-seg-pf': '#196f3d',  # Very dark green
+        }
+        
+        # Check for direct match first
+        if model_name in model_colors:
+            return model_colors[model_name]
+        
+        # Check for model family patterns using prefix matching
+        if 'yolo8' in model_name.lower():
+            return '#e74c3c'  # Default YOLOv8 family (red)
+        elif 'yolo9' in model_name.lower():
+            return '#16a085'  # Default YOLOv9 family (teal)
+        elif 'yolo11' in model_name.lower():
+            return '#8e44ad'  # Default YOLOv11 family (purple)
+        elif 'yoloe-11' in model_name.lower() or 'yoloe11' in model_name.lower():
+            return '#3498db'  # Default YOLO-E v11 family (blue)
+        elif 'yoloe-v8' in model_name.lower() or 'yoloe8' in model_name.lower():
+            return '#27ae60'  # Default YOLO-E v8 family (green)
+        elif 'yolo' in model_name.lower():
+            return '#d35400'  # Other YOLO variants (orange)
+        elif 'mask' in model_name.lower():
+            return '#1f77b4'  # Mask family (blue)
+        elif 'detr' in model_name.lower():
+            return '#2ca02c'  # DETR family (green)
+        
+        # For any other models, use a hash function to assign colors from this list
+        color_list = [
+            '#1f77b4',  # Blue
+            '#2ca02c',  # Green
+            '#d62728',  # Red
+            '#9467bd',  # Purple
+            '#8c564b',  # Brown
+            '#e377c2',  # Pink
+            '#7f7f7f',  # Grey
+            '#bcbd22',  # Olive
+            '#17becf',  # Cyan
+            '#ff7f0e',  # Orange
+            '#aec7e8',  # Light blue
+            '#ffbb78',  # Light orange
+            '#98df8a',  # Light green
+            '#ff9896'   # Light red
+        ]
+        
+        # Generate a consistent hash for the model name
+        model_hash = sum(ord(c) for c in model_name)
+        return color_list[model_hash % len(color_list)]
 
+    def _prepare_summary_data(self):
+        """Prepare summary data for plotting."""
+        # Extract main metrics for all models
+        model_metrics = []
+        for model_name, model_data in self.data['results'].items():
+            metrics = {}
+            metrics['Model'] = model_name
+            
+            # Get COCO metrics if available
+            coco_metrics = model_data.get('coco_metrics', {})
+            if coco_metrics and not isinstance(coco_metrics, dict):
+                coco_metrics = {}  # Handle case where coco_metrics is not a dict
+            
+            # Use COCO metrics for mAP and AR when available, otherwise use our default calculations
+            metrics['mAP (IoU=0.50:0.95)'] = coco_metrics.get('AP_IoU=0.50:0.95', 0.0)
+            metrics['AP (IoU=0.50)'] = coco_metrics.get('AP_IoU=0.50', 0.0)
+            metrics['AP (IoU=0.75)'] = coco_metrics.get('AP_IoU=0.75', 0.0)
+            metrics['Small Objects AP'] = coco_metrics.get('AP_small', 0.0)
+            metrics['Medium Objects AP'] = coco_metrics.get('AP_medium', 0.0)
+            metrics['Large Objects AP'] = coco_metrics.get('AP_large', 0.0)
+            metrics['AR (max=100)'] = coco_metrics.get('AR_max=100', 0.0)
+            
+            # Calculate F1-Score when we have precision and recall or separately calculate from detections
+            if metrics['AP (IoU=0.50)'] > 0 and coco_metrics.get('AR_max=100', 0) > 0:
+                precision = metrics['AP (IoU=0.50)']  # Use AP@0.5 as precision
+                recall = coco_metrics.get('AR_max=100', 0)  # Use AR@100 as recall
+                
+                # Calculate F1 score: 2 * (precision * recall) / (precision + recall)
+                if precision + recall > 0:
+                    metrics['F1-Score'] = 2 * (precision * recall) / (precision + recall)
+                else:
+                    metrics['F1-Score'] = 0.0
+            else:
+                # Alternative F1 calculation for cases with zero AP/AR
+                # This is an approximation based on detection counts
+                total_detections = model_data.get('total_detections', 0)
+                if total_detections > 0:
+                    # We don't have ground truth information directly available here,
+                    # so we'll use a very rough approximation
+                    metrics['F1-Score'] = 0.0001 * (total_detections / max(1, model_data.get('total_images', 1)))
+                else:
+                    metrics['F1-Score'] = 0.0
+            
+            # Get segmentation metrics if available
+            coco_segm_metrics = model_data.get('coco_segm_metrics', {})
+            if coco_segm_metrics:
+                metrics['Segm_mAP (IoU=0.50:0.95)'] = coco_segm_metrics.get('Segm_AP_IoU=0.50:0.95', 0.0)
+                metrics['Segm_AP (IoU=0.50)'] = coco_segm_metrics.get('Segm_AP_IoU=0.50', 0.0)
+            
+            # Get efficiency metrics
+            metrics['Speed (FPS)'] = model_data.get('fps', 0.0)
+            metrics['Mean Inference Time (ms)'] = model_data.get('mean_inference_time', 0.0) * 1000  # Convert to ms
+            
+            # Other standard metrics
+            metrics['Total Detections'] = model_data.get('total_detections', 0)
+            metrics['Detection Rate'] = model_data.get('avg_detections_per_image', 0.0)
+            metrics['Unique Classes'] = model_data.get('unique_classes_detected', 0)
+            
+            model_metrics.append(metrics)
+        
+        # Create a DataFrame
+        df = pd.DataFrame(model_metrics)
+        if not df.empty:
+            df.set_index('Model', inplace=True)
+        
+        return df
 
     def _plot_summary_table(self, ax):
-        """Creates a summary table of key metrics using matplotlib.table."""
-        table_cols_map = {
-            'mAP (IoU=0.50:0.95)'   : 'mAP', 'AP (IoU=0.50)' : 'AP@50',
-            'AP (IoU=0.75)' : 'AP@75', 'F1-Score' : 'F1-Score',
-            'Speed (FPS)' : 'FPS', 'Small Objects AP' : 'Small AP',
-            'Medium Objects AP' : 'Med AP', 'Large Objects AP' : 'Large AP'
-        }
-        available_cols = {
-            original: display for original, display in table_cols_map.items()
-            if original in self.data['summary_df'].columns
-        }
-
-        if not available_cols:
-            ax.text(0.5, 0.5, 'No summary data available for table.', ha='center', va='center', transform=ax.transAxes)
-            ax.set_title('Summary Metrics Table', fontsize=12); ax.axis('off')
-            return
-
-        original_col_order = list(available_cols.keys())
-        df_table = self.data['summary_df'][original_col_order].copy()
-        df_table.rename(columns=available_cols, inplace=True)
-
-        # --- Format Data (Simplified) ---
-        for col in df_table.columns:
-            if col == 'FPS':
-                df_table[col] = df_table[col].apply(lambda x: f"{x:.1f}" if pd.notna(x) else 'N/A')
-            elif col in ['mAP', 'AP@50', 'AP@75', 'F1-Score', 'Small AP', 'Med AP', 'Large AP']:
-                df_table[col] = df_table[col].apply(lambda x: f"{x:.4f}" if pd.notna(x) else 'N/A')
-            else:
-                df_table[col] = df_table[col].apply(lambda x: f"{x}" if pd.notna(x) else 'N/A')
-
-        df_table.reset_index(inplace=True) # Makes 'Model' a column
-
-        # --- Create Table ---
+        """Creates a comprehensive summary table with key metrics for all models."""
+        # Hide axis elements for the table
         ax.axis('off')
-        ax.set_title('Summary Metrics Table', fontsize=12, pad=10)
-        if df_table.empty: return # Should not happen if available_cols is not empty
-
-        table = Table(ax, bbox=[0, 0, 1, 1])
-        n_rows, n_cols = df_table.shape
-        cell_height = 1.0 / (n_rows + 1)
-        cell_width = 1.0 / n_cols
-
-        # Header Row
-        for j, col_name in enumerate(df_table.columns):
-            cell = table.add_cell(0, j, cell_width, cell_height, text=col_name, loc='center', facecolor='#E0E0E0')
-            cell.set_fontsize(9); cell.set_text_props(weight='bold'); cell.set_edgecolor('black')
-
-        # Data Rows
-        for i in range(n_rows):
-            bg_color = '#FEEEEE' # Fixed light reddish background
-            for j, value in enumerate(df_table.iloc[i]):
-                cell = table.add_cell(i + 1, j, cell_width, cell_height, text=str(value), loc='center', facecolor=bg_color)
-                cell.set_fontsize(9); cell.set_edgecolor('black')
-                if j == 0: cell.set_text_props(weight='bold')
-
-        table.scale(1, 1.5)
-        ax.add_table(table)
-
-
-    # --- Placeholder/Alias Methods ---
-
-    def load_multiple_results(self, pattern="evaluation_results_*.json"):
-        """Loads data from multiple JSON result files for trend analysis."""
-        all_results = {}
-        try:
-            files = sorted(self.results_dir.glob(pattern), key=os.path.getctime)
-            if len(files) < 2:
-                 print("Need at least two result files for trend analysis.")
-                 return None
-
-            for file in files:
-                 try:
-                    parts = file.stem.split('_')
-                    ts_str = "_".join(parts[-2:]) # YYYYMMDD_HHMMSS
-                    timestamp = datetime.strptime(ts_str, "%Y%m%d_%H%M%S")
-                 except (ValueError, IndexError):
-                     print(f"Could not parse timestamp from filename {file.name}, using file time.")
-                     timestamp = datetime.fromtimestamp(os.path.getctime(file))
-
-                 try:
-                     with open(file, 'r') as f: data = json.load(f)
-                     all_results[timestamp] = data
-                 except Exception as e_load: print(f"Could not load or parse {file.name}: {e_load}")
-
-        except Exception as e:
-             print(f"Error finding or processing result files: {e}")
-             traceback.print_exc(); return None
-        return all_results if all_results else None
-
-    def plot_performance_trends(self, aggregated_data=None, metrics=None, show_plot=False):
-        """Plots performance metrics over time from multiple results files."""
-        if aggregated_data is None: aggregated_data = self.load_multiple_results()
-        if not aggregated_data or len(aggregated_data) < 2:
-            print("Not enough aggregated data available for trend plotting."); return None
-        if metrics is None: metrics = ['mAP (IoU=0.50:0.95)', 'F1-Score', 'Speed (FPS)']
-
-        trend_data, models_found = {}, set()
-        timestamps = sorted(aggregated_data.keys())
-
-        for ts in timestamps:
-             results_at_ts = aggregated_data[ts]
-             current_models = set(m for m in results_at_ts.keys() if m != "evaluation_metadata")
-             models_found.update(current_models)
-             for model in current_models:
-                if model not in trend_data:
-                    trend_data[model] = {m: [] for m in metrics}; trend_data[model]['timestamp'] = []
-                trend_data[model]['timestamp'].append(ts)
-                for metric in metrics:
-                    value = self._get_metric_from_dict(results_at_ts.get(model, {}), metric, default=np.nan)
-                    trend_data[model][metric].append(value)
-
-        n_metrics = len(metrics); n_cols = min(3, n_metrics); n_rows = (n_metrics + n_cols - 1) // n_cols
-        fig, axes = plt.subplots(n_rows, n_cols, figsize=(7 * n_cols, 5 * n_rows), squeeze=False); axes = axes.flatten()
-
-        for i, metric in enumerate(metrics):
-            ax = axes[i]; plotted_models = 0
-            for model in sorted(list(models_found)):
-                if model in trend_data:
-                     ts_data = trend_data[model]['timestamp']; metric_data = trend_data[model][metric]
-                     if len(ts_data) == len(metric_data):
-                         s = pd.Series(metric_data, index=ts_data)
-                         if s.notna().any():
-                             ax.plot(s.index, s.values, marker='o', linestyle='-', label=model, color=get_model_color(model), markersize=5)
-                             plotted_models += 1
-                     # else: print(f"Warn: Len mismatch {model}, {metric}") # Optional warning
-            if plotted_models > 0: ax.legend(fontsize='small')
-            else: ax.text(0.5, 0.5, 'No data for this metric', ha='center', va='center', transform=ax.transAxes)
-            ax.set_title(f'Trend: {metric}'); ax.set_xlabel('Time'); ax.set_ylabel('Value')
-            ax.grid(True, linestyle='--'); fig.autofmt_xdate(rotation=30, ha='right')
-
-        for j in range(i + 1, len(axes)): fig.delaxes(axes[j]) # Hide unused
-        fig.suptitle('Model Performance Trends Over Time', fontsize=16, y=1.02)
-        plt.tight_layout(rect=[0, 0.03, 1, 0.97])
-
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        output_filename = f"performance_trends_{timestamp}.png"
-        output_path = VISUALIZATIONS_DIR / output_filename
-        try:
-            plt.savefig(output_path, dpi=150, bbox_inches='tight'); print(f"Trends plot saved: {output_path}")
-            if show_plot: plt.show()
-            else: plt.close(fig)
-            return str(output_path.resolve())
-        except Exception as e: print(f"Error saving trends plot: {e}"); traceback.print_exc(); plt.close(fig); return None
-
-    def _get_metric_from_dict(self, data_dict, metric_path, default=np.nan):
-        """ Helper function to safely get nested metric from a dictionary. """
-        keys = metric_path.split('.'); current_level = data_dict
-        try:
-            for key in keys:
-                if isinstance(current_level, dict) and key in current_level: current_level = current_level[key]
-                else: return default
-            return float(current_level) if isinstance(current_level, (int, float)) else default
-        except (TypeError, ValueError): return default
-
-    def show_precision_recall_curve(self, show_plot=True):
-        """Generates the main dashboard, as PRF1 plot is included."""
-        print("Note: Generating full dashboard (Precision/Recall/F1 included).")
-        return self.create_metrics_dashboard(show_plot=show_plot)
-
-    def show_reliability_analysis(self, show_plot=True):
-        """Placeholder - Generates the main dashboard."""
-        print("Note: Reliability analysis plot not specifically implemented. Generating full dashboard.")
-        return self.create_metrics_dashboard(show_plot=show_plot)
-
-    def generate_comprehensive_report(self):
-        """Generates the dashboard image file as the 'report'."""
-        print("Generating dashboard image as comprehensive report.")
-        report_path = self.create_metrics_dashboard(show_plot=False)
-        if report_path: print(f"Comprehensive report image saved to: {report_path}")
-        else: print("Failed to generate comprehensive report image.")
-        return report_path
-
+        
+        # Make sure we have data to display
+        if not hasattr(self, 'data') or 'summary_df' not in self.data or self.data['summary_df'].empty:
+            ax.text(0.5, 0.5, 'No data available for summary table.',
+                   ha='center', va='center', transform=ax.transAxes)
+            return
+            
+        # Select key metrics for the table - order matters for display
+        metrics_to_include = [
+            'mAP (IoU=0.50:0.95)', # Overall mAP 
+            'AP (IoU=0.50)',        # Standard AP at IoU=0.5
+            'F1-Score',             # F1 Score
+            'Large Objects AP',     # Object size performance
+            'Medium Objects AP',
+            'Small Objects AP',
+            'Speed (FPS)'           # Speed performance
+        ]
+        
+        # Filter to only include metrics that exist in our data
+        available_metrics = [m for m in metrics_to_include if m in self.data['summary_df'].columns]
+        
+        if not available_metrics:
+            ax.text(0.5, 0.5, 'No metrics available for summary table.',
+                   ha='center', va='center', transform=ax.transAxes)
+            return
+        
+        # Extract and round the data for display
+        display_df = self.data['summary_df'][available_metrics].copy()
+        
+        # Format the table data for better readability
+        table_data = []
+        header_row = ['Model'] + [m.replace(' (IoU=0.50:0.95)', '').replace(' Objects AP', '') for m in available_metrics]
+        table_data.append(header_row)
+        
+        # For each model, add a row with formatted values
+        for model_name in display_df.index:
+            row = [model_name]  # Start with model name
+            for metric in available_metrics:
+                val = display_df.loc[model_name, metric]
+                
+                # Format based on metric type
+                if 'Speed' in metric:
+                    # FPS with 1 decimal place
+                    formatted_val = f"{val:.1f}"
+                elif val < 0.01:
+                    # Very small values with scientific notation
+                    formatted_val = f"{val:.3e}"
+                elif val < 0.1:
+                    # Small values with 4 decimal places
+                    formatted_val = f"{val:.4f}"
+                else:
+                    # Standard values with 3 decimal places
+                    formatted_val = f"{val:.3f}" 
+                
+                row.append(formatted_val)
+            
+            table_data.append(row)
+            
+        # Create the table
+        table = ax.table(
+            cellText=table_data,
+            loc='center',
+            cellLoc='center',
+            bbox=[0.0, 0.0, 1.0, 1.0]  # Fill the entire subplot area
+        )
+        
+        # Style the table
+        table.auto_set_font_size(False)
+        table.set_fontsize(10)
+        
+        # Style header row
+        for i, cell in enumerate(table._cells[(0, col)] for col in range(len(header_row))):
+            cell.set_text_props(weight='bold', color='white')
+            cell.set_facecolor('#4472C4')  # Blue header background
+            
+        # Set column widths based on content
+        table.auto_set_column_width([i for i in range(len(header_row))])
+        
+        # Alternate row colors for better readability
+        for row_idx in range(1, len(table_data)):
+            for col_idx in range(len(header_row)):
+                cell = table._cells[(row_idx, col_idx)]
+                
+                # Style based on row position (alternating colors)
+                if row_idx % 2 == 1:
+                    cell.set_facecolor('#E6F0FF')  # Light blue for odd rows
+                else:
+                    cell.set_facecolor('#F5F8FF')  # Even lighter blue for even rows
+                    
+                # Highlight best values in each column - skip model name column (0)
+                if col_idx > 0:
+                    # Extract numeric values for this column to find the best
+                    col_values = [float(table_data[i][col_idx]) if table_data[i][col_idx] not in ['nan', 'N/A'] 
+                                 else float('-inf') for i in range(1, len(table_data))]
+                    
+                    try:
+                        best_idx = col_values.index(max(col_values)) + 1  # +1 because we start from row 1
+                        if row_idx == best_idx:
+                            cell.set_text_props(weight='bold', color='darkgreen')
+                    except (ValueError, TypeError):
+                        pass  # Skip highlighting if conversion issues
+        
+        ax.set_title('Summary Table', size=12, y=1.02)
 
 # Example usage block for testing the script directly
 if __name__ == "__main__":

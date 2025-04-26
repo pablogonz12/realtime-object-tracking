@@ -39,13 +39,17 @@ CONFIGS_DIR.mkdir(parents=True, exist_ok=True)
 
 # Default paths to model weights/configs
 DEFAULT_MODEL_PATHS = {
-    'mask-rcnn': 'maskrcnn_resnet50_fpn_coco', # Use torchvision's built-in model
+    # Temporarily disabled for YOLO-only comparisons, but keep it here for reference
+    'mask-rcnn': 'maskrcnn_resnet50_fpn_coco', # Will be re-enabled when needed
     # YOLOv8
     'yolo8n-seg': MODELS_DIR / 'yolov8n-seg.pt',
     'yolo8s-seg': MODELS_DIR / 'yolov8s-seg.pt',
     'yolo8m-seg': MODELS_DIR / 'yolov8m-seg.pt',
     'yolo8l-seg': MODELS_DIR / 'yolov8l-seg.pt',
     'yolo8x-seg': MODELS_DIR / 'yolov8x-seg.pt',
+    # YOLOv9
+    'yolo9c-seg': MODELS_DIR / 'yolov9c-seg.pt',
+    'yolo9e-seg': MODELS_DIR / 'yolov9e-seg.pt',
     # YOLOv11
     'yolo11n-seg': MODELS_DIR / 'yolo11n-seg.pt',
     'yolo11s-seg': MODELS_DIR / 'yolo11s-seg.pt',
@@ -80,6 +84,9 @@ MODEL_URLS = {
     'yolo8m-seg': BASE_URL_V82 + 'yolov8m-seg.pt',
     'yolo8l-seg': BASE_URL_V82 + 'yolov8l-seg.pt',
     'yolo8x-seg': BASE_URL_V82 + 'yolov8x-seg.pt',
+    # YOLOv9
+    'yolo9c-seg': BASE_URL_V83 + 'yolov9c-seg.pt',
+    'yolo9e-seg': BASE_URL_V83 + 'yolov9e-seg.pt',
     # YOLOv11
     'yolo11n-seg': BASE_URL_V83 + 'yolo11n-seg.pt',
     'yolo11s-seg': BASE_URL_V83 + 'yolo11s-seg.pt',

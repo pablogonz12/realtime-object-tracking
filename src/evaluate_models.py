@@ -42,13 +42,10 @@ RESULTS_DIR.mkdir(exist_ok=True, parents=True)
 
 # Configure models for evaluation
 # Dynamically build the list from DEFAULT_MODEL_PATHS
-MODELS_TO_EVALUATE = [
-    {"type": "mask-rcnn", "path": DEFAULT_MODEL_PATHS['mask-rcnn'], "config": None}
-]
-# Add all YOLO-based models
+MODELS_TO_EVALUATE = []
+# Add all models from DEFAULT_MODEL_PATHS
 for model_key, model_path in DEFAULT_MODEL_PATHS.items():
-    if model_key != 'mask-rcnn':  # Skip mask-rcnn as it's already added
-        MODELS_TO_EVALUATE.append({"type": model_key, "path": model_path, "config": None})
+    MODELS_TO_EVALUATE.append({"type": model_key, "path": model_path, "config": None})
 
 # COCO val2017 has 5000 images total
 COCO_VAL_TOTAL_IMAGES = 5000
@@ -259,14 +256,13 @@ class ModelEvaluator:
                 
                 # Format detections for COCO evaluation
                 for det_idx, det in enumerate(detections):
-                    # Get class ID (COCO dataset uses categories 1-90)
+                    # Get class ID for COCO format
                     class_id = det.get("class_id")
 
-                    # --- DEBUGGING START ---
-                    # if model_type == "yolo8-seg" and idx < 3 and det_idx < 5: # Updated model type
-                    #     pass # Or remove the block entirely
-                    # --- DEBUGGING END ---
-
+                    # Debug large sample of detections to understand class IDs
+                    if idx < 3 and det_idx < 5:
+                        print(f"DEBUG: {model_type} detection {det_idx} - class_id={class_id}, class_name={det.get('class_name', 'unknown')}, score={det.get('score', 0)}")
+                    
                     # Skip if class_id is None or not recognized
                     if class_id is None:
                         continue
@@ -286,16 +282,9 @@ class ModelEvaluator:
                             'score': float(det.get("score", 0.0))
                         }
                         
-                        # --- DEBUGGING START ---
-                        # Updated check to include all yolo8-seg variants
-                        if model_type.startswith("yolo8") and model_type.endswith("-seg") and len(coco_bbox_predictions) > 0:
-                            print(f"DEBUG ({model_type}): First few formatted bbox preds: {coco_bbox_predictions[:5]}")
-                        # --- DEBUGGING END ---
-                        
                         coco_bbox_predictions.append(pred)
                 
                 # If segmentation masks are available (for YOLO models), add them to COCO predictions
-                # Updated check to handle all YOLO variants with segmentation
                 is_yolo_seg_model = model_type != 'mask-rcnn' and (model_type.endswith('-seg') or model_type.endswith('-seg-pf'))
                 if segmentations and is_yolo_seg_model:
                     for i, mask in enumerate(segmentations):
@@ -309,11 +298,28 @@ class ModelEvaluator:
                             
                             # Convert binary mask to RLE format that COCO expects
                             try:
+                                # Debug for sample masks
+                                if idx < 2 and i < 2:
+                                    print(f"DEBUG: {model_type} segm {i} - mask shape={mask.shape}, class_id={class_id}, class_name={det.get('class_name', 'unknown')}")
+                                
                                 # Ensure mask is binary (0/1)
                                 binary_mask = (mask > 0).astype(np.uint8)
                                 
                                 # Get mask dimensions
                                 mask_h, mask_w = binary_mask.shape[:2]
+                                
+                                # Debug mask size vs image size
+                                if idx < 2 and i < 2:
+                                    img_h, img_w = image.shape[:2]
+                                    print(f"DEBUG: Image size: {img_w}x{img_h}, Mask size: {mask_w}x{mask_h}")
+                                
+                                # Resize mask if needed to match image dimensions
+                                img_h, img_w = image.shape[:2]
+                                if mask_h != img_h or mask_w != img_w:
+                                    binary_mask = cv2.resize(binary_mask, (img_w, img_h), 
+                                                           interpolation=cv2.INTER_NEAREST)
+                                    if idx < 2 and i < 2:
+                                        print(f"DEBUG: Resized mask to match image: {img_w}x{img_h}")
                                 
                                 # Calculate area 
                                 area = float(np.sum(binary_mask))
@@ -338,7 +344,7 @@ class ModelEvaluator:
                             except Exception as mask_err:
                                 print(f"Error converting segmentation mask: {mask_err}")
                                 continue
-            
+
             except Exception as e:
                 print(f"Error processing image {image_id} with {model_type}: {e}")
                 metrics["failures"] += 1
@@ -359,26 +365,80 @@ class ModelEvaluator:
         # Run COCO evaluation if we have ground truth annotations and predictions
         if self.coco_gt_api is not None and (coco_bbox_predictions or coco_segm_predictions):
             try:
+                # Before evaluation, check validation format
+                if coco_bbox_predictions:
+                    # Verify a sample of predictions
+                    print(f"\nDEBUG: First 3 bbox predictions from {len(coco_bbox_predictions)} total:")
+                    for i, pred in enumerate(coco_bbox_predictions[:3]):
+                        print(f"  {i}: image_id={pred['image_id']}, category_id={pred['category_id']}, score={pred['score']:.3f}")
+                    
+                    # Get ground truth categories for comparison
+                    gt_cats = self.coco_gt_api.loadCats(self.coco_gt_api.getCatIds())
+                    print(f"\nDEBUG: First 5 ground truth categories:")
+                    for i, cat in enumerate(gt_cats[:5]):
+                        print(f"  {i}: id={cat['id']}, name={cat['name']}")
+                    
+                    # Validate category IDs against ground truth
+                    valid_cat_ids = set(cat['id'] for cat in gt_cats)
+                    unknown_cat_ids = set(pred['category_id'] for pred in coco_bbox_predictions) - valid_cat_ids
+                    
+                    if unknown_cat_ids:
+                        print(f"\nWARNING: Found {len(unknown_cat_ids)} category IDs not in ground truth: {sorted(unknown_cat_ids)[:5]}...")
+                        # Fix category IDs if needed - map to valid IDs or remove invalid ones
+                        valid_predictions = []
+                        for pred in coco_bbox_predictions:
+                            if pred['category_id'] in valid_cat_ids:
+                                valid_predictions.append(pred)
+                        
+                        if len(valid_predictions) < len(coco_bbox_predictions):
+                            print(f"WARNING: Removed {len(coco_bbox_predictions) - len(valid_predictions)} predictions with invalid category IDs")
+                            coco_bbox_predictions = valid_predictions
+                
                 # Evaluate bounding box predictions
                 if coco_bbox_predictions:
                     print(f"Running COCO bbox evaluation for {model_type} with {len(coco_bbox_predictions)} predictions")
                     
-                    # --- DEBUGGING START ---
-                    # Updated check to include all yolo8-seg variants
-                    if model_type.startswith("yolo8") and model_type.endswith("-seg") and len(coco_bbox_predictions) > 0:
-                        print(f"DEBUG ({model_type}): First few formatted bbox preds: {coco_bbox_predictions[:5]}")
-                    # --- DEBUGGING END ---
-
                     # Save predictions to a temporary file
                     with tempfile.NamedTemporaryFile('w', suffix='.json', delete=False) as f:
                         json.dump(coco_bbox_predictions, f)
                         dt_bbox_file = f.name
                     
                     # Initialize the COCO detection object with predictions
-                    coco_dt = self.coco_gt_api.loadRes(dt_bbox_file)
+                    try:
+                        coco_dt = self.coco_gt_api.loadRes(dt_bbox_file)
+                    except Exception as e:
+                        print(f"\nERROR loading detection results: {e}")
+                        print("Attempting to fix format issues...")
+                        
+                        # Try to fix potentially problematic predictions
+                        fixed_predictions = []
+                        for pred in coco_bbox_predictions:
+                            try:
+                                # Ensure all required fields are present and in correct format
+                                fixed_pred = {
+                                    'image_id': int(pred['image_id']),
+                                    'category_id': int(pred['category_id']),
+                                    'bbox': [float(x) for x in pred['bbox']],
+                                    'score': float(pred['score'])
+                                }
+                                fixed_predictions.append(fixed_pred)
+                            except Exception as fix_err:
+                                print(f"Skipping invalid prediction: {fix_err}")
+                                continue
+                        
+                        # Save fixed predictions
+                        with tempfile.NamedTemporaryFile('w', suffix='.json', delete=False) as f:
+                            json.dump(fixed_predictions, f)
+                            dt_bbox_file = f.name
+                        
+                        coco_dt = self.coco_gt_api.loadRes(dt_bbox_file)
                     
                     # Create the COCO evaluator for bounding box
                     coco_bbox_eval = COCOeval(self.coco_gt_api, coco_dt, 'bbox')
+                    
+                    # Optional: Set specific image IDs to evaluate (only those we processed)
+                    eval_img_ids = [img_id for _, img_id in images]
+                    coco_bbox_eval.params.imgIds = eval_img_ids
                     
                     # Run evaluation
                     coco_bbox_eval.evaluate()
@@ -404,16 +464,11 @@ class ModelEvaluator:
                     # Clean up the temporary file
                     os.unlink(dt_bbox_file)
                 
-                # Evaluate segmentation predictions (only for yolo models)
+                # Evaluate segmentation predictions similarly with debug and fixes
                 # Updated check for all yolo segmentation models
                 if is_yolo_seg_model and coco_segm_predictions:
                     print(f"Running COCO segmentation evaluation for {model_type} with {len(coco_segm_predictions)} predictions")
                     
-                    # --- DEBUGGING START ---
-                    if len(coco_segm_predictions) > 0:
-                        print(f"DEBUG ({model_type}): First few formatted segm preds: {coco_segm_predictions[:5]}")
-                    # --- DEBUGGING END ---
-
                     # Save predictions to a temporary file
                     with tempfile.NamedTemporaryFile('w', suffix='.json', delete=False) as f:
                         json.dump(coco_segm_predictions, f)
