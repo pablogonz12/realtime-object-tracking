@@ -47,12 +47,6 @@ MODEL_COLORS = {
     'yolo11m-seg': '#C6DEC7',     # Pale green
     'yolo11l-seg': '#EAD3E7',     # Lilac
     'yolo11x-seg': '#F1E6C8',     # Cream
-    'yoloe-11s-seg': '#F3E0A2',   # Pale yellow
-    'yoloe-11m-seg': '#E6C2DC',   # Soft pink
-    'yoloe-11l-seg': '#D5A6BD',   # Rose
-    'yoloe-v8s-seg': '#C9C8F9',   # Lavender
-    'yoloe-v8m-seg': '#9AB5FF',   # Periwinkle
-    'yoloe-v8l-seg': '#5C9AD5',   # Cool blue
     'Default': '#A0A0A0'          # Neutral gray
 }
 
@@ -950,10 +944,10 @@ class MetricsVisualizer:
             else:
                 # Fall back to the original _get_model_color for additional models
                 model_colors[model] = self._get_model_color(model)
-        
+
         # Create colors array for models
         model_color_list = [model_colors[model] for model in models]
-        
+
         # Create lighter versions of the colors for the time bars
         time_colors = []
         for color in model_color_list:
@@ -1180,7 +1174,7 @@ class MetricsVisualizer:
             f1_ranks = f1_score.rank(method='dense')
             max_rank = f1_ranks.max()
             if max_rank > 1:  # If we have different ranks
-                # Scale between 0.01 and 0.1 for visibility
+                # Scale between 0.01 and 0.1 with minimum visibility threshold
                 f1_plot = 0.01 + (0.09 * (f1_ranks - 1) / (max_rank - 1))
                 transformed = True
             else:
@@ -1490,22 +1484,6 @@ class MetricsVisualizer:
             'yolo11m-seg': '#7d3c98',   # Purple
             'yolo11l-seg': '#6c3483',   # Dark purple
             'yolo11x-seg': '#4a235a',   # Very dark purple
-            
-            # YOLO-E v11 family - blue gradient
-            'yoloe-11s-seg': '#3498db',     # Light blue
-            'yoloe-11s-seg-pf': '#2e86c1',  # Light-medium blue
-            'yoloe-11m-seg': '#2874a6',     # Medium blue
-            'yoloe-11m-seg-pf': '#21618c',  # Medium-dark blue
-            'yoloe-11l-seg': '#1a5276',     # Dark blue
-            'yoloe-11l-seg-pf': '#154360',  # Very dark blue
-            
-            # YOLO-E v8 family - green gradient
-            'yoloe-v8s-seg': '#58d68d',     # Light green
-            'yoloe-v8s-seg-pf': '#52be80',  # Light-medium green
-            'yoloe-v8m-seg': '#27ae60',     # Medium green
-            'yoloe-v8m-seg-pf': '#229954',  # Medium-dark green
-            'yoloe-v8l-seg': '#1e8449',     # Dark green
-            'yoloe-v8l-seg-pf': '#196f3d',  # Very dark green
         }
         
         # Check for direct match first
@@ -1519,16 +1497,6 @@ class MetricsVisualizer:
             return '#16a085'  # Default YOLOv9 family (teal)
         elif 'yolo11' in model_name.lower():
             return '#8e44ad'  # Default YOLOv11 family (purple)
-        elif 'yoloe-11' in model_name.lower() or 'yoloe11' in model_name.lower():
-            return '#3498db'  # Default YOLO-E v11 family (blue)
-        elif 'yoloe-v8' in model_name.lower() or 'yoloe8' in model_name.lower():
-            return '#27ae60'  # Default YOLO-E v8 family (green)
-        elif 'yolo' in model_name.lower():
-            return '#d35400'  # Other YOLO variants (orange)
-        elif 'mask' in model_name.lower():
-            return '#1f77b4'  # Mask family (blue)
-        elif 'detr' in model_name.lower():
-            return '#2ca02c'  # DETR family (green)
         
         # For any other models, use a hash function to assign colors from this list
         color_list = [
@@ -1919,6 +1887,7 @@ if __name__ == "__main__":
         print("\nVisualizer could not load results. Cannot run visualization tests.")
 
     print(f"--- MetricsVisualizer Test Block Finished ---")
+
 
 
 

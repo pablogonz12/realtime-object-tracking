@@ -68,20 +68,6 @@ DEFAULT_MODEL_PATHS = {
     'yolo11m-seg': MODELS_DIR / 'yolo11m-seg.pt',
     'yolo11l-seg': MODELS_DIR / 'yolo11l-seg.pt',
     'yolo11x-seg': MODELS_DIR / 'yolo11x-seg.pt',
-    # YOLO-E v11
-    'yoloe-11s-seg': MODELS_DIR / 'yoloe-11s-seg.pt',
-    'yoloe-11s-seg-pf': MODELS_DIR / 'yoloe-11s-seg-pf.pt',
-    'yoloe-11m-seg': MODELS_DIR / 'yoloe-11m-seg.pt',
-    'yoloe-11m-seg-pf': MODELS_DIR / 'yoloe-11m-seg-pf.pt',
-    'yoloe-11l-seg': MODELS_DIR / 'yoloe-11l-seg.pt',
-    'yoloe-11l-seg-pf': MODELS_DIR / 'yoloe-11l-seg-pf.pt',
-    # YOLO-E v8
-    'yoloe-v8s-seg': MODELS_DIR / 'yoloe-v8s-seg.pt',
-    'yoloe-v8s-seg-pf': MODELS_DIR / 'yoloe-v8s-seg-pf.pt',
-    'yoloe-v8m-seg': MODELS_DIR / 'yoloe-v8m-seg.pt',
-    'yoloe-v8m-seg-pf': MODELS_DIR / 'yoloe-v8m-seg-pf.pt',
-    'yoloe-v8l-seg': MODELS_DIR / 'yoloe-v8l-seg.pt',
-    'yoloe-v8l-seg-pf': MODELS_DIR / 'yoloe-v8l-seg-pf.pt',
 }
 
 # URLs for downloading models if needed
@@ -105,20 +91,6 @@ MODEL_URLS = {
     'yolo11m-seg': BASE_URL_V83 + 'yolo11m-seg.pt',
     'yolo11l-seg': BASE_URL_V83 + 'yolo11l-seg.pt',
     'yolo11x-seg': BASE_URL_V83 + 'yolo11x-seg.pt',
-    # YOLO-E v11
-    'yoloe-11s-seg': BASE_URL_V83 + 'yoloe-11s-seg.pt',
-    'yoloe-11s-seg-pf': BASE_URL_V83 + 'yoloe-11s-seg-pf.pt',
-    'yoloe-11m-seg': BASE_URL_V83 + 'yoloe-11m-seg.pt',
-    'yoloe-11m-seg-pf': BASE_URL_V83 + 'yoloe-11m-seg-pf.pt',
-    'yoloe-11l-seg': BASE_URL_V83 + 'yoloe-11l-seg.pt',
-    'yoloe-11l-seg-pf': BASE_URL_V83 + 'yoloe-11l-seg-pf.pt',
-    # YOLO-E v8
-    'yoloe-v8s-seg': BASE_URL_V83 + 'yoloe-v8s-seg.pt',
-    'yoloe-v8s-seg-pf': BASE_URL_V83 + 'yoloe-v8s-seg-pf.pt',
-    'yoloe-v8m-seg': BASE_URL_V83 + 'yoloe-v8m-seg.pt',
-    'yoloe-v8m-seg-pf': BASE_URL_V83 + 'yoloe-v8m-seg-pf.pt',
-    'yoloe-v8l-seg': BASE_URL_V83 + 'yoloe-v8l-seg.pt',
-    'yoloe-v8l-seg-pf': BASE_URL_V83 + 'yoloe-v8l-seg-pf.pt',
 }
 
 # --- Helper Function for Downloading ---

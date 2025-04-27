@@ -43,12 +43,6 @@ DEFAULT_MODELS = {
     'yolo11m-seg': 'models/pts/yolo11m-seg.pt',
     'yolo11l-seg': 'models/pts/yolo11l-seg.pt',
     'yolo11x-seg': 'models/pts/yolo11x-seg.pt',
-    'yoloe-11s-seg': 'models/pts/yoloe-11s-seg.pt',
-    'yoloe-11m-seg': 'models/pts/yoloe-11m-seg.pt',
-    'yoloe-11l-seg': 'models/pts/yoloe-11l-seg.pt',
-    'yoloe-v8s-seg': 'models/pts/yoloe-v8s-seg.pt',
-    'yoloe-v8m-seg': 'models/pts/yoloe-v8m-seg.pt',
-    'yoloe-v8l-seg': 'models/pts/yoloe-v8l-seg.pt',
     'yolov9c-seg': 'models/pts/yolov9c-seg.pt',
     'yolov9e-seg': 'models/pts/yolov9e-seg.pt'
 }
@@ -1746,9 +1740,7 @@ class GraphicalGUI:
         """
         This method is kept for compatibility but no longer needed for preview
         """
-        pass  # Do nothing, preview always plays
-
-    def _update_video_progress(self, current_frame, total_frames):
+        pass  # Do nothing    def _update_video_progress(self, current_frame, total_frames):
         """Update the video progress bar"""
         if hasattr(self, 'video_control_dims'):
 
