@@ -1725,7 +1725,7 @@ class GraphicalGUI:
             canvas_width / 2, canvas_height - 35,
             text="Click progress bar to seek",
             fill="white", font=("Arial", 9),
-            justify=tk.CENTER,
+           justify=tk.CENTER,
             tags="video_controls"
         )
 
@@ -3193,6 +3193,3 @@ if __name__ == "__main__":
     # Ensure the models/pts directory exists
     os.makedirs("models/pts", exist_ok=True)
     main()
-
-
-
