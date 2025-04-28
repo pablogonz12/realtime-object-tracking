@@ -6,7 +6,6 @@ Generates a comprehensive dashboard comparing model performance based on
 evaluation results stored in JSON files. Designed to automatically incorporate
 any models found in the results file.
 """
-
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
 from matplotlib.table import Table
@@ -18,6 +17,7 @@ from pathlib import Path
 from datetime import datetime
 import glob
 import os
+import re
 import traceback # For detailed error printing
 
 # Configure paths relative to this script's location
@@ -526,8 +526,12 @@ class MetricsVisualizer:
         else:
             ax.set_title('Precision, Recall, F1-Score Comparison')
             
+        # Use simplified model names when there are more than 5 models
+        model_names = df.index.tolist()
+        display_names = self._simplify_model_names(model_names)
+        
         ax.set_xticks(index + bar_width * (n_metrics - 1) / 2)
-        ax.set_xticklabels(df.index, rotation=0, ha='center')
+        ax.set_xticklabels(display_names, rotation=0, ha='center')
         ax.legend(title="Metric", fontsize='small')
 
         # Dynamic y-axis
@@ -627,8 +631,12 @@ class MetricsVisualizer:
         if scaled: ax.set_title('Average Precision (AP) at Different IoU Thresholds\n(Values scaled for visibility)')
         else: ax.set_title('Average Precision (AP) at Different IoU Thresholds')
         
+        # Use simplified model names when there are more than 5 models
+        model_names = df.index.tolist()
+        display_names = self._simplify_model_names(model_names)
+        
         ax.set_xticks(index + bar_width * (n_metrics - 1) / 2)
-        ax.set_xticklabels(df.index, rotation=0, ha='center')
+        ax.set_xticklabels(display_names, rotation=0, ha='center')
         ax.legend(title="AP Metric", fontsize='small')
         
         max_plotted = df.max().max()
@@ -721,8 +729,11 @@ class MetricsVisualizer:
             # Configure axes
             ax.set_ylabel('Shape Metric Value (0-1)')
             ax.set_title('Shape Analysis (Segmentation Quality)')
+            
+            # Use simplified model names when there are more than 5 models
+            display_names = self._simplify_model_names(model_names)
             ax.set_xticks(index + bar_width * (n_metrics - 1) / 2)
-            ax.set_xticklabels(model_names, rotation=0, ha='center')
+            ax.set_xticklabels(display_names, rotation=0, ha='center')
             ax.legend(title="Shape Metrics", fontsize='small')
             
             # Set y-limits for shape metrics (typically 0-1)
@@ -809,8 +820,11 @@ class MetricsVisualizer:
             # Configure axes
             ax.set_ylabel('Circularity Value (0-1)')
             ax.set_title('Shape Analysis by Object Size')
+            
+            # Use simplified model names when there are more than 5 models
+            display_names = self._simplify_model_names(model_names)
             ax.set_xticks(index + bar_width * (n_sizes - 1) / 2)
-            ax.set_xticklabels(model_names, rotation=0, ha='center')
+            ax.set_xticklabels(display_names, rotation=0, ha='center')
             ax.legend(title="Object Size", fontsize='small')
             
             # Set y-limits (circularity is typically 0-1)
@@ -850,8 +864,13 @@ class MetricsVisualizer:
                 
             ax.set_ylabel('Segmentation AP Value')
             ax.set_title('Shape Analysis (Segmentation Performance)')
+            
+            # Use simplified model names when there are more than 5 models
+            model_names = df.index.tolist()
+            display_names = self._simplify_model_names(model_names)
+            
             ax.set_xticks(index + bar_width * (n_metrics - 1) / 2)
-            ax.set_xticklabels(df.index, rotation=0, ha='center')
+            ax.set_xticklabels(display_names, rotation=0, ha='center')
             ax.legend(title="Segm. Metric", fontsize='small')
             
             # Set appropriate y-limits
@@ -897,8 +916,13 @@ class MetricsVisualizer:
                 
             ax.set_ylabel('AP Value')
             ax.set_title('Shape Analysis (by Object Size)')
+            
+            # Use simplified model names when there are more than 5 models
+            model_names = df.index.tolist()
+            display_names = self._simplify_model_names(model_names)
+            
             ax.set_xticks(index + bar_width * (n_metrics - 1) / 2)
-            ax.set_xticklabels(df.index, rotation=0, ha='center')
+            ax.set_xticklabels(display_names, rotation=0, ha='center')
             ax.legend(title="Object Size", fontsize='small')
             
             max_val = df.max().max() if not df.empty else 0
@@ -910,7 +934,6 @@ class MetricsVisualizer:
         ax.text(0.5, 0.5, 'Shape analysis metrics not available.\nNo segmentation or object size data found.',
                ha='center', va='center', transform=ax.transAxes)
         ax.set_title('Shape Analysis')
-
 
     def _plot_fps(self, ax):
         """Plots processing speed (FPS) and inference time (ms) side by side."""
@@ -990,7 +1013,11 @@ class MetricsVisualizer:
         
         # Set the x-ticks to be in the middle of the model groups
         ax.set_xticks(x_pos)
-        ax.set_xticklabels(models, rotation=0, ha='center')
+        
+        # Use simplified model names when there are more than 5 models
+        model_names = models.tolist()
+        display_names = self._simplify_model_names(model_names)
+        ax.set_xticklabels(display_names, rotation=0, ha='center')
         
         # Add a grid for better readability (only for the primary y-axis)
         ax.grid(axis='y', linestyle='--', alpha=0.6)
@@ -1122,8 +1149,12 @@ class MetricsVisualizer:
         else:
             ax.set_title('Distribution of Detections by Object Size')
             
+        # Use simplified model names when there are more than 5 models
+        model_names = df.index.tolist()
+        display_names = self._simplify_model_names(model_names)    
+        
         ax.set_xticks(index + bar_width * (len(available_size_metrics) - 1) / 2)
-        ax.set_xticklabels(df.index, rotation=0, ha='center')
+        ax.set_xticklabels(display_names, rotation=0, ha='center')
         ax.legend(title="Object Size", fontsize='small')
         
         # Set y-limits based on data
@@ -1199,16 +1230,25 @@ class MetricsVisualizer:
                           edgecolors='black',
                           linewidths=1)
 
+        # Check if we should use simplified model names for the legend
+        model_list = models.tolist()
+        use_simple_names = len(model_list) > 5
+        display_names = self._simplify_model_names(model_list) if use_simple_names else model_list
+
         # Label each point with model name and actual F1-Score value
         for i, model in enumerate(models):
             # Format label based on original F1 value
             if f1_score.iloc[i] < 0.001:
-                label = f"{model}\n(F1: {f1_score.iloc[i]:.5f})"
+                suffix = f"\n(F1: {f1_score.iloc[i]:.5f})"
             elif f1_score.iloc[i] < 0.01:
-                label = f"{model}\n(F1: {f1_score.iloc[i]:.4f})"
+                suffix = f"\n(F1: {f1_score.iloc[i]:.4f})"
             else:
-                label = f"{model}"
+                suffix = ""
                 
+            # Use simplified model name if there are more than 5 models
+            display_name = display_names[i] if use_simple_names else model
+            label = f"{display_name}{suffix}"
+            
             ax.annotate(label, 
                       (fps.iloc[i], f1_plot.iloc[i]),
                       xytext=(5, 5),
@@ -1243,11 +1283,15 @@ class MetricsVisualizer:
             # Create legend handles manually
             from matplotlib.lines import Line2D
             legend_elements = []
-            for i, model in enumerate(models):
+            
+            # Use simplified names in the legend manually
+            legend_models = display_names
+            
+            for i, model_name in enumerate(legend_models):
                 legend_elements.append(
                     Line2D([0], [0], marker='o', color='w', 
                           markerfacecolor=colors[i], markersize=8, 
-                          label=model)
+                          label=model_name)
                 )
                 
             # Place legend outside plot area to the right
@@ -1259,6 +1303,12 @@ class MetricsVisualizer:
             ax.text(0.5, 0.02, 'Note: Original F1-Score values are shown in labels',
                    ha='center', transform=ax.transAxes,
                    fontsize=8, style='italic', color='darkgray')
+                   
+        # Add note about simplified names if applicable
+        if use_simple_names:
+            ax.text(0.5, -0.02, 'Note: Model names are simplified (e.g., "yolo8n-seg" → "8n")',
+                   ha='center', transform=ax.transAxes,
+                   fontsize=8, style='italic', color='dimgray')
 
     def _plot_radar(self, ax):
         """Creates the multi-dimensional radar chart with model-relative scaling."""
@@ -1410,6 +1460,11 @@ class MetricsVisualizer:
             print(f"Warning: Too many models ({len(models_to_plot)}) for radar chart. Limiting to {max_models_in_radar}.")
             models_to_plot = models_to_plot[:max_models_in_radar]
         
+        # Check if we need to simplify model names for the legend
+        model_list = models_to_plot.tolist()
+        use_simple_names = len(model_list) > 5
+        display_names = self._simplify_model_names(model_list) if use_simple_names else model_list
+        
         # Create a consistent color mapping for models based on their order
         # Use the same palette colors (blue, orange, teal) that we use for metrics
         palette_colors = [self.METRIC_COLORS['Precision'], self.METRIC_COLORS['Recall'], self.METRIC_COLORS['F1-Score']]
@@ -1444,6 +1499,10 @@ class MetricsVisualizer:
             # Indicate which metrics are shown at zoomed scale
             zoomed_str = ", ".join(zoomed_metrics)
             title += f'\n(Zoomed view for: {zoomed_str})'
+        
+        # Add note about simplified names if applicable
+        if use_simple_names:
+            title += '\n(Model names simplified for clarity)'
             
         ax.set_title(title, size=12, y=1.12)
         
@@ -1817,6 +1876,40 @@ class MetricsVisualizer:
                     fontsize=8.5, style='italic', color='dimgray')
             
         ax.set_title('Summary Table', size=12, y=1.02)
+
+    def _simplify_model_names(self, model_names):
+        """
+        Simplifies model names for display on x-axis when there are many models.
+        
+        Args:
+            model_names (list): List of model names to simplify
+            
+        Returns:
+            list: Simplified model names
+        """
+        # If 5 or fewer models, return the original names
+        if len(model_names) <= 5:
+            return model_names
+            
+        # If more than 5 models, simplify the names
+        simplified_names = []
+        for name in model_names:
+            # For YOLO models, extract just the version and size (e.g., "yolo8n-seg" -> "8n")
+            if 'yolo' in name.lower():
+                # Extract digits after "yolo" and the letter following them
+                import re
+                match = re.search(r'yolo(\d+)([a-zA-Z]+)', name)
+                if match:
+                    # Use the version number and model size letter
+                    simplified_names.append(f"{match.group(1)}{match.group(2)}")
+                else:
+                    # Fallback if pattern doesn't match
+                    simplified_names.append(name)
+            else:
+                # For non-YOLO models, keep the original name
+                simplified_names.append(name)
+                
+        return simplified_names
 
 # Example usage block for testing the script directly
 if __name__ == "__main__":

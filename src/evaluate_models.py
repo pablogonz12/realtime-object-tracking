@@ -258,8 +258,8 @@ class ModelEvaluator:
                 # Count successful inferences
                 metrics["successful_inferences"] += 1
                 
-                # Record detection count for this image <<< ADDED
-                metrics["detection_counts_per_image"].append(len(detections)) # <<< ADDED
+                # Record detection count for this image
+                metrics["detection_counts_per_image"].append(len(detections))
                 
                 # Count total detections
                 metrics["total_detections"] += len(detections)
@@ -304,9 +304,12 @@ class ModelEvaluator:
                         
                         coco_bbox_predictions.append(pred)
                 
-                # If segmentation masks are available (for YOLO models), add them to COCO predictions
-                is_yolo_seg_model = model_type != 'mask-rcnn' and (model_type.endswith('-seg') or model_type.endswith('-seg-pf'))
-                if segmentations and is_yolo_seg_model:
+                # Check if this is a segmentation model based on model type or presence of segmentations
+                # Modified to better detect segmentation models based on naming patterns and capabilities
+                is_seg_model = 'seg' in model_type.lower() or any('seg' in k for k in DEFAULT_MODEL_PATHS.keys() if model_type in k)
+                
+                # Process segmentation masks if available
+                if segmentations and (is_seg_model or len(segmentations) > 0):
                     for i, mask in enumerate(segmentations):
                         if i < len(detections) and mask is not None:  # Make sure we have a detection to pair with
                             det = detections[i]
@@ -504,9 +507,8 @@ class ModelEvaluator:
                     # Clean up the temporary file
                     os.unlink(dt_bbox_file)
                 
-                # Evaluate segmentation predictions similarly with debug and fixes
-                # Updated check for all yolo segmentation models
-                if is_yolo_seg_model and coco_segm_predictions:
+                # Evaluate segmentation predictions for models with segmentation capability
+                if coco_segm_predictions and is_seg_model:
                     print(f"Running COCO segmentation evaluation for {model_type} with {len(coco_segm_predictions)} predictions")
                     
                     # Save predictions to a temporary file
@@ -515,10 +517,42 @@ class ModelEvaluator:
                         dt_segm_file = f.name
                     
                     # Initialize the COCO detection object with predictions
-                    coco_dt = self.coco_gt_api.loadRes(dt_segm_file)
+                    try:
+                        coco_dt = self.coco_gt_api.loadRes(dt_segm_file)
+                    except Exception as e:
+                        print(f"\nERROR loading segmentation results: {e}")
+                        print("Attempting to fix format issues...")
+                        
+                        # Try to fix potentially problematic predictions
+                        fixed_predictions = []
+                        for pred in coco_segm_predictions:
+                            try:
+                                # Ensure all required fields are present and in correct format
+                                fixed_pred = {
+                                    'image_id': int(pred['image_id']),
+                                    'category_id': int(pred['category_id']),
+                                    'segmentation': pred['segmentation'],
+                                    'score': float(pred['score']),
+                                    'area': float(pred['area']) if 'area' in pred else 100.0
+                                }
+                                fixed_predictions.append(fixed_pred)
+                            except Exception as fix_err:
+                                print(f"Skipping invalid segmentation prediction: {fix_err}")
+                                continue
+                        
+                        # Save fixed predictions
+                        with tempfile.NamedTemporaryFile('w', suffix='.json', delete=False) as f:
+                            json.dump(fixed_predictions, f)
+                            dt_segm_file = f.name
+                        
+                        coco_dt = self.coco_gt_api.loadRes(dt_segm_file)
                     
                     # Create the COCO evaluator for segmentation
                     coco_segm_eval = COCOeval(self.coco_gt_api, coco_dt, 'segm')
+                    
+                    # Optional: Set specific image IDs to evaluate (only those we processed)
+                    eval_img_ids = [img_id for _, img_id in images]
+                    coco_segm_eval.params.imgIds = eval_img_ids
                     
                     # Run evaluation
                     coco_segm_eval.evaluate()
@@ -543,13 +577,26 @@ class ModelEvaluator:
                     
                     # Clean up the temporary file
                     os.unlink(dt_segm_file)
-                    
+                # Even if we don't have segmentation predictions, include basic metric structure for consistency
+                elif is_seg_model and not coco_segm_predictions:
+                    print(f"No valid segmentation predictions for {model_type}")
+                    # Add empty segmentation metrics to maintain consistent structure
+                    metrics["coco_segm_metrics"] = {
+                        "Segm_AP_IoU=0.50:0.95": 0.0,
+                        "Segm_AP_IoU=0.50": 0.0,
+                        "Segm_AP_IoU=0.75": 0.0,
+                        "Segm_AP_small": 0.0,
+                        "Segm_AP_medium": 0.0,
+                        "Segm_AP_large": 0.0
+                    }
             except Exception as e:
                 print(f"Error during COCO evaluation for {model_type}: {e}")
                 import traceback
                 traceback.print_exc()
                 
                 metrics["coco_metrics"] = {"error": str(e)}
+                if is_seg_model:
+                    metrics["coco_segm_metrics"] = {"error": str(e)}
         
         # Print summary
         print(f"\n{model_type.upper()} Evaluation Summary:")
@@ -567,16 +614,18 @@ class ModelEvaluator:
             print(f"  • AP (IoU=0.75): {metrics['coco_metrics']['AP_IoU=0.75']:.4f}")
         
         # Print segmentation metrics if available
-        if "coco_segm_metrics" in metrics and metrics.get("coco_segm_metrics") and "error" not in metrics.get("coco_segm_metrics", {}):
+        if "coco_segm_metrics" in metrics and metrics["coco_segm_metrics"] and "error" not in metrics["coco_segm_metrics"]:
             print("- COCO Segmentation Metrics:")
             print(f"  • Segmentation mAP (IoU=0.50:0.95): {metrics['coco_segm_metrics']['Segm_AP_IoU=0.50:0.95']:.4f}")
             print(f"  • Segmentation AP (IoU=0.50): {metrics['coco_segm_metrics']['Segm_AP_IoU=0.50']:.4f}")
             print(f"  • Segmentation AP (IoU=0.75): {metrics['coco_segm_metrics']['Segm_AP_IoU=0.75']:.4f}")
         
-        # --- DEBUGGING START ---
-        # print(f"DEBUG ({model_type}): Final detection_counts_per_image (first 10): {metrics.get('detection_counts_per_image', 'MISSING')[:10]}")
-        # print(f"DEBUG ({model_type}): Length of detection_counts_per_image: {len(metrics.get('detection_counts_per_image', []))}")
-        # --- DEBUGGING END ---
+        # If shape metrics were collected, include summary stats
+        if metrics["shape_metrics"]["compactness"]:
+            print("- Shape Metrics (Segmentation Quality):")
+            print(f"  • Compactness: {np.mean(metrics['shape_metrics']['compactness']):.4f}")
+            print(f"  • Convexity: {np.mean(metrics['shape_metrics']['convexity']):.4f}")
+            print(f"  • Circularity: {np.mean(metrics['shape_metrics']['circularity']):.4f}")
 
         return metrics
     

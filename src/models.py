@@ -571,56 +571,30 @@ class ModelManager:
 
     def _get_device(self):
         """Determine the device to use with enhanced detection for problematic CUDA setups."""
-        # Check if we have an environment variable to force a specific device
-        force_device = os.environ.get("CV_FORCE_DEVICE", "").lower()
-
-        # First attempt: Check standard PyTorch CUDA availability
-        cuda_available = torch.cuda.is_available()
-
-        # Second attempt: Check if NVIDIA drivers are installed even if PyTorch doesn't see them
-        nvidia_driver_available = False
+        # Check for environment variable to force CPU
+        force_device = os.environ.get('FORCE_CPU_INFERENCE', '').lower()
+        
         try:
-            import subprocess
-            nvidia_smi = subprocess.run(['nvidia-smi'], capture_output=True, text=True, check=False) # Use check=False
-            if nvidia_smi.returncode == 0:
-                nvidia_driver_available = True
-                print("NVIDIA drivers detected via nvidia-smi")
-                # Parse nvidia-smi output to get GPU name
-                for line in nvidia_smi.stdout.split('\n'):
-                    if "NVIDIA" in line and ("RTX" in line or "GeForce" in line or "Tesla" in line): # Broader check
-                        gpu_name = line.strip()
-                        print(f"Found GPU via nvidia-smi: {gpu_name}")
-                        break # Found one, no need to check further
-        except FileNotFoundError:
-             print("nvidia-smi command not found. Cannot check for NVIDIA drivers this way.")
-        except Exception as e:
-            print(f"Error running nvidia-smi: {e}")
-
-        # Determine if we should force CUDA based on environment and hardware detection
-        force_cuda = (force_device == "cuda" or
-                     (force_device != "cpu" and (cuda_available or nvidia_driver_available))) # Default to GPU if available unless CPU forced
-
-        # Use CUDA if forced or available and not overridden by CPU force
-        if force_cuda and cuda_available:
-            device_count = torch.cuda.device_count()
-            current_device = torch.cuda.current_device()
-            device_name = torch.cuda.get_device_name(current_device)
-            print(f"Using CUDA with GPU: {device_name} (Available: {device_count})")
-            return 'cuda'
-        elif force_cuda and nvidia_driver_available and not cuda_available:
-            # If user wants CUDA (or default auto) and we see NVIDIA drivers but PyTorch doesn't recognize them,
-            # warn the user but still try CPU as CUDA won't work.
-            print("WARNING: NVIDIA GPU detected but PyTorch cannot access it via CUDA.")
-            print("This is likely due to PyTorch being installed without CUDA support or a driver/CUDA toolkit mismatch.")
-            print("Please check your PyTorch installation and CUDA setup.")
-            print("Falling back to CPU.")
-            return 'cpu'
-        else:
-            # Fallback to CPU
-            if force_device == "cpu":
-                 print("Forcing CPU usage based on environment variable.")
+            if torch.cuda.is_available() and force_device != "true" and force_device != "cpu":
+                # Try to detect problematic setups
+                try:
+                    # Very minimal operation to test if CUDA is actually working
+                    test_tensor = torch.zeros(1).cuda()
+                    del test_tensor
+                    print("CUDA is available and working. Using GPU for inference.")
+                    return 'cuda'
+                except Exception as e:
+                    print(f"CUDA appears to be available but encountered an error: {e}")
+                    print("Falling back to CPU for inference.")
+                    return 'cpu'
             else:
-                 print("Using CPU for model inference (No CUDA GPU detected/available or CPU forced).")
+                if force_device == "cpu":
+                     print("Forcing CPU usage based on environment variable.")
+                else:
+                     print("Using CPU for model inference (No CUDA GPU detected/available or CPU forced).")
+                return 'cpu'
+        except Exception as e:
+            print(f"Error detecting device capabilities: {e}. Using CPU as fallback.")
             return 'cpu'
 
     def _initialize_model(self):
@@ -637,11 +611,22 @@ class ModelManager:
                 
             # More flexible handling of YOLO model types
             elif 'yolo' in self.model_type.lower():
-                # Handle all YOLO segmentation variants regardless of naming convention
+                # Check if this is a segmentation model
+                is_seg_model = 'seg' in self.model_type.lower()
+                
                 print(f"Loading YOLO model from: {self.model_path}")
-                return YOLOWrapper(self.model_path, 
-                                   conf_threshold=self.conf_threshold,
-                                   iou_threshold=self.iou_threshold)
+                print(f"Model type: {self.model_type} (Segmentation: {is_seg_model})")
+                
+                # Create the wrapper with proper thresholds
+                yolo_wrapper = YOLOWrapper(
+                    self.model_path, 
+                    conf_threshold=self.conf_threshold,
+                    iou_threshold=self.iou_threshold
+                )
+                
+                # Store whether this is a segmentation model for reference
+                yolo_wrapper.is_seg_model = is_seg_model
+                return yolo_wrapper
                 
             else:
                 print(f"Error: Unsupported model type: {self.model_type}")
@@ -670,20 +655,31 @@ class ModelManager:
             print(f"Error: Model wrapper for {self.model_type} is not initialized or lacks predict method.")
             annotated_frame = frame.copy()
             # Add error text to frame
-            cv2.putText(annotated_frame, f"{self.model_type.upper()} Model Error", (10, 60), # Adjusted position
+            cv2.putText(annotated_frame, f"{self.model_type.upper()} Model Error", (10, 60),
                         cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
             return [], [], annotated_frame # Return empty results and annotated frame
 
         try:
-            # All current models (Mask R-CNN, YOLO-Seg) use the same predict signature
-            return self.model_wrapper.predict(frame)
+            # All current models (YOLO-Seg) use the same predict signature
+            results = self.model_wrapper.predict(frame)
+            
+            # Ensure we have a proper 3-tuple result
+            if not results or len(results) != 3:
+                print(f"Warning: Invalid prediction results from {self.model_type} model")
+                annotated_frame = frame.copy()
+                cv2.putText(annotated_frame, f"{self.model_type.upper()} Invalid Results", (10, 60),
+                            cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
+                return [], [], annotated_frame
+                
+            return results
+            
         except Exception as e:
             print(f"Error during prediction with {self.model_type}: {e}")
             import traceback
             traceback.print_exc()
             annotated_frame = frame.copy()
             # Add error text to frame
-            cv2.putText(annotated_frame, f"{self.model_type.upper()} Predict Error", (10, 60), # Adjusted position
+            cv2.putText(annotated_frame, f"{self.model_type.upper()} Predict Error", (10, 60),
                         cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
             # Return empty lists and the annotated error frame
             return [], [], annotated_frame
