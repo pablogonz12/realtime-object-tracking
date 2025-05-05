@@ -1656,8 +1656,9 @@ class GraphicalGUI:
 
                 # In preview mode, add video info overlay
                 if is_preview:
-                    # Add video name and frame count as overlay
-                    info_text = f"{os.path.basename(video_path)} - Frame {frame_idx}/{total_frames}"
+                    # Format filename to be more readable (remove extension and add ellipsis if too long)
+                    formatted_filename = self._format_filename(video_path)
+                    info_text = f"{formatted_filename} - Frame {frame_idx}/{total_frames}"
                     cv2.putText(frame_resized, info_text, (10, 30), 
                                 cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
 
@@ -1740,10 +1741,11 @@ class GraphicalGUI:
         """
         This method is kept for compatibility but no longer needed for preview
         """
-        pass  # Do nothing    def _update_video_progress(self, current_frame, total_frames):
-        """Update the video progress bar"""
-        if hasattr(self, 'video_control_dims'):
+        pass
 
+    def _update_video_progress(self, current_frame, total_frames):
+        """Update the video progress bar"""
+        if hasattr(self, 'video_control_dims') and hasattr(self, 'video_progress'):
             dims = self.video_control_dims
             progress_ratio = current_frame / total_frames if total_frames > 0 else 0
             progress_width = dims['progress_right'] - dims['progress_left']
@@ -1765,7 +1767,7 @@ class GraphicalGUI:
             click_pos = max(0, min(event.x - dims['progress_left'], progress_width))
             seek_ratio = click_pos / progress_width
             # Set frame to seek to
-            self.seek_toframe = int(total_frames * seek_ratio)
+            self.seek_to_frame = int(total_frames * seek_ratio)
 
     def _update_video_display(self, pil_img):
         """Update the video display on the canvas"""
@@ -1877,15 +1879,28 @@ class GraphicalGUI:
         if not self.processing_active:
             return
         self.stop_preview = True  # Signal the thread to stop
+        
+        # Set the stop event to terminate the thread
+        if hasattr(self, 'stop_event'):
+            self.stop_event.set()
+            
+        # Update the button text immediately to give feedback
+        self.webcam_button.config(text="Start Camera")
+        
         # Wait for the thread to stop without blocking the main thread
         def wait_for_thread():
             if self.video_thread and self.video_thread.is_alive():
                 self.root.after(100, wait_for_thread)  # Check again after 100ms
             else:
+                # Clean up webcam resources if they exist
+                if hasattr(self, 'webcam') and self.webcam is not None:
+                    self.webcam.release()
+                    self.webcam = None
+                
+                # Update status
                 self.processing_active = False
                 self.status_var.set("Webcam detection stopped.")
-                # Update the button text back to "Start Camera"
-                self.webcam_button.config(text="Start Camera")
+                
                 # Display statistics after stopping
                 stats = {
                     "frames_processed": self.frame_count,
@@ -1897,6 +1912,8 @@ class GraphicalGUI:
                     "model_device": "cpu"  # Assuming CPU for now; update if GPU is used
                 }
                 self.show_completion_stats(stats)
+        
+        # Start waiting for thread
         wait_for_thread()
 
     def _toggle_webcam_detection(self):
@@ -3111,6 +3128,19 @@ class GraphicalGUI:
             )
             self.status_var.set(f"Error deleting model files: {str(e)}")
 
+    def _format_filename(self, file_path, max_length=25):
+        """Format a filename for display by removing extension and adding ellipsis if too long"""
+        # Get filename without path
+        filename = os.path.basename(file_path)
+        # Remove extension
+        filename = os.path.splitext(filename)[0]
+        # Replace hyphens with spaces for better readability
+        filename = filename.replace('-', ' ')
+        # Truncate if too long
+        if len(filename) > max_length:
+            filename = filename[:max_length-3] + "..."
+        return filename
+
 def main():
     """
     Main function that processes command line arguments or launches GUI
@@ -3169,7 +3199,7 @@ def main():
     else:
         # Check if display is available (basic check for headless environments)
         try:
-            # Test with ThemedTk instead of tk.Tk
+            # Test with ThemedTk instead of tk.Tk  
             root = ThemedTk(theme="arc") 
             root.withdraw() # Don't show the root window immediately
             root.destroy() # Clean up
