@@ -54,20 +54,38 @@ DEFAULT_MODEL_PATHS = {
     # 'mask-rcnn': 'maskrcnn_resnet50_fpn_coco', # Will be re-enabled when needed
     
     # YOLOv8
+    'yolov8n-seg': MODELS_DIR / 'yolov8n-seg.pt',
+    'yolov8s-seg': MODELS_DIR / 'yolov8s-seg.pt',
+    'yolov8m-seg': MODELS_DIR / 'yolov8m-seg.pt',
+    'yolov8l-seg': MODELS_DIR / 'yolov8l-seg.pt',
+    'yolov8x-seg': MODELS_DIR / 'yolov8x-seg.pt',
+    
+    # Aliases without the 'v' for backward compatibility
     'yolo8n-seg': MODELS_DIR / 'yolov8n-seg.pt',
     'yolo8s-seg': MODELS_DIR / 'yolov8s-seg.pt',
     'yolo8m-seg': MODELS_DIR / 'yolov8m-seg.pt',
     'yolo8l-seg': MODELS_DIR / 'yolov8l-seg.pt',
     'yolo8x-seg': MODELS_DIR / 'yolov8x-seg.pt',
+    
     # YOLOv9
+    'yolov9c-seg': MODELS_DIR / 'yolov9c-seg.pt',
+    'yolov9e-seg': MODELS_DIR / 'yolov9e-seg.pt',
     'yolo9c-seg': MODELS_DIR / 'yolov9c-seg.pt',
     'yolo9e-seg': MODELS_DIR / 'yolov9e-seg.pt',
+    
     # YOLOv11
     'yolo11n-seg': MODELS_DIR / 'yolo11n-seg.pt',
     'yolo11s-seg': MODELS_DIR / 'yolo11s-seg.pt',
     'yolo11m-seg': MODELS_DIR / 'yolo11m-seg.pt',
     'yolo11l-seg': MODELS_DIR / 'yolo11l-seg.pt',
     'yolo11x-seg': MODELS_DIR / 'yolo11x-seg.pt',
+    
+    # With 'v' for consistency
+    'yolov11n-seg': MODELS_DIR / 'yolo11n-seg.pt',
+    'yolov11s-seg': MODELS_DIR / 'yolo11s-seg.pt',
+    'yolov11m-seg': MODELS_DIR / 'yolo11m-seg.pt',
+    'yolov11l-seg': MODELS_DIR / 'yolo11l-seg.pt',
+    'yolov11x-seg': MODELS_DIR / 'yolo11x-seg.pt',
 }
 
 # URLs for downloading models if needed

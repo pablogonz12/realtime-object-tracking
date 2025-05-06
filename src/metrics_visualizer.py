@@ -1911,6 +1911,114 @@ class MetricsVisualizer:
                 
         return simplified_names
 
+    def plot_precision_recall_curves(self, show_plot=False):
+        """
+        Plots precision-recall curves for all models.
+        
+        Args:
+            show_plot (bool): If True, display the plot interactively using plt.show().
+                             If False, only save the plot to a file.
+                             
+        Returns:
+            str: Absolute path to the saved PR curves image file, or None if generation failed.
+        """
+        if not self.results or not self.models:
+            print("Error: No valid results loaded. Cannot create PR curves.")
+            return None
+            
+        # Create figure
+        fig, ax = plt.subplots(figsize=(12, 8))
+        
+        # Get precision-recall data for each model
+        for model in self.models:
+            if model not in self.results:
+                continue
+                
+            model_data = self.results[model]
+            
+            # Try to find precision and recall arrays
+            precision_arrays = model_data.get('precision_arrays', {})
+            recall_arrays = model_data.get('recall_arrays', {})
+            
+            # If we have matching precision and recall arrays for classes
+            if precision_arrays and recall_arrays:
+                for class_id, precision in precision_arrays.items():
+                    if class_id in recall_arrays:
+                        recall = recall_arrays[class_id]
+                        # Get class name if available
+                        class_name = model_data.get('class_names', {}).get(class_id, f"Class {class_id}")
+                        # Plot PR curve for this class
+                        color = self._get_model_color(model)
+                        linestyle = '--' if '_seg' in model else '-'
+                        ax.plot(recall, precision, label=f"{model}-{class_name}", 
+                               color=color, linestyle=linestyle, alpha=0.7)
+            
+            # Check if we have overall precision-recall values
+            if 'precision' in model_data and 'recall' in model_data:
+                precision = model_data['precision']
+                recall = model_data['recall']
+                
+                # Check if these are arrays
+                if isinstance(precision, list) and isinstance(recall, list) and len(precision) == len(recall):
+                    color = self._get_model_color(model)
+                    linestyle = '--' if '_seg' in model else '-'
+                    ax.plot(recall, precision, label=f"{model} (Overall)", 
+                           color=color, linestyle=linestyle, linewidth=2)
+        
+        # If we don't have any PR curves, create a placeholder plot
+        if len(ax.get_lines()) == 0:
+            # Display message about missing PR curve data
+            ax.text(0.5, 0.5, "Precision-Recall curve data not available.", 
+                   fontsize=12, ha='center', va='center', transform=ax.transAxes)
+            ax.set_xlim(0, 1)
+            ax.set_ylim(0, 1)
+        else:
+            # Configure the plot
+            ax.set_xlabel('Recall', fontsize=12)
+            ax.set_ylabel('Precision', fontsize=12)
+            ax.set_xlim(0, 1.05)
+            ax.set_ylim(0, 1.05)
+            ax.grid(linestyle='--', alpha=0.6)
+            
+            # Add diagonal reference line representing random performance
+            ax.plot([0, 1], [1, 0], color='gray', linestyle=':')
+            
+            # Add legend (adjust for many models)
+            if len(self.models) > 5:
+                # For many models, put legend outside
+                ax.legend(loc='center left', bbox_to_anchor=(1, 0.5), fontsize='small')
+            else:
+                # For fewer models, put legend inside
+                ax.legend(loc='lower left', fontsize='small')
+        
+        # Add title
+        results_filename = self.results_file.name if self.results_file else "unknown_results.json"
+        ax.set_title(f'Precision-Recall Curves\nEvaluation results from {results_filename}',
+                    fontsize=14)
+        
+        # Save the figure
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        output_filename = f"precision_recall_curves_{timestamp}.png"
+        output_path = VISUALIZATIONS_DIR / output_filename
+        
+        try:
+            # Save the figure with good resolution
+            plt.savefig(output_path, dpi=150, bbox_inches='tight', facecolor='white')
+            print(f"Precision-Recall curves saved to: {output_path}")
+            
+            if show_plot:
+                plt.show()
+            else:
+                plt.close(fig)
+                
+            return str(output_path.resolve())
+            
+        except Exception as e:
+            print(f"Error saving or showing PR curve plot: {e}")
+            traceback.print_exc()
+            plt.close(fig)
+            return None
+
 # Example usage block for testing the script directly
 if __name__ == "__main__":
     print(f"--- Executing MetricsVisualizer Test Block ---")

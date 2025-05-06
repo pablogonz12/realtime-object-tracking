@@ -11,6 +11,23 @@ import time
 from pathlib import Path
 import threading
 
+def get_video_properties(video_capture):
+    """
+    Get the properties of a video from a VideoCapture object.
+    
+    Args:
+        video_capture (cv2.VideoCapture): OpenCV VideoCapture object
+        
+    Returns:
+        tuple: (fps, total_frames, width, height)
+    """
+    fps = video_capture.get(cv2.CAP_PROP_FPS)
+    total_frames = int(video_capture.get(cv2.CAP_PROP_FRAME_COUNT))
+    width = int(video_capture.get(cv2.CAP_PROP_FRAME_WIDTH))
+    height = int(video_capture.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    
+    return fps, total_frames, width, height
+
 def process_video_with_model(
     video_path, 
     model_manager, 
