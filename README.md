@@ -485,7 +485,7 @@ The project includes robust error handling with:
 Validation checks include:
 - File path existence and format
 - Model name validity
-- Parameter ranges (confidence thresholds, IoU thresholds)
+- Parameter ranges (confidence thresholds, IoU settings)
 - Image and video format compatibility
 - Device availability (CUDA, CPU, MPS)
 
@@ -521,3 +521,15 @@ Future enhancements may include:
 - Additional model architectures
 - Enhanced visualization options
 - Cloud deployment options
+
+# Test Organization
+
+The project includes two types of tests:
+
+1. **Basic Tests**: These are lightweight tests designed to quickly verify core functionality. They are located in files with `_basic` in their names (e.g., `test_models_basic.py`).
+
+2. **Full Tests**: These are comprehensive tests that cover all edge cases and scenarios. They are located in files without `_basic` in their names (e.g., `test_models.py`).
+
+### When to Use
+- Use **basic tests** during development for quick feedback.
+- Use **full tests** before deployment or during CI/CD pipelines to ensure complete coverage.
