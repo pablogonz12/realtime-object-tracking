@@ -1,5 +1,9 @@
 # Computer Vision Object Recognition System
 
+![Python](https://img.shields.io/badge/python-3.13-blue.svg)
+![License](https://img.shields.io/badge/license-MIT-orange.svg)
+![Status](https://img.shields.io/badge/status-development-yellow.svg)
+
 ## Project Overview
 This project implements a computer vision system for detecting and segmenting objects in videos and images. The system evaluates multiple state-of-the-art object detection and segmentation algorithms on the COCO dataset, analyzing their performance for validity, reliability, and objectivity.
 
@@ -14,14 +18,14 @@ The COCO (Common Objects in Context) dataset was chosen as a representative data
 ### Key Features
 - Object detection and segmentation in videos
 - Performance evaluation of multiple models
-- Interactive GUI for visualization and analysis
+- Reliable command-line interfaces for automation and scripting (recommended)
 - Comprehensive metrics dashboard
-- Command-line interfaces for automation and scripting
+- Interactive GUI for visualization and analysis (alpha state, not recommended for evaluation)
 
 ## Requirements and Setup
 
 ### Software Requirements
-- Python 3.8+ (tested with Python 3.8, 3.9, and 3.10)
+- Python 3.13 (current development version)
 - PyTorch 1.10+
 - OpenCV 4.5+
 - CUDA-capable GPU (recommended for optimal performance)
@@ -92,10 +96,24 @@ Please see our [detailed analysis report](REPORT.md).
 
 This section outlines the main scripts, their purposes, and what outputs to expect from each.
 
-### GUI Application (Beta)
-The GUI application provides an interactive interface to run models, visualize results, and generate metrics.
+### GUI Application (Beta Version)
 
-**Command:**
+The GUI application provides an interactive way to:
+- Run object detection models
+- Visualize the detection results
+- Generate performance metrics
+
+**⚠️ IMPORTANT: USE WITH CAUTION**
+
+The GUI application (`app.py`) is currently in **beta testing** and has several stability issues:
+- May crash unexpectedly during operation
+- Contains bugs that affect functionality
+- Has inconsistent or inaccurate interface elements
+
+**For reliable results:** We strongly recommend using the command-line tools described in the following sections instead of the GUI.
+
+To launch the GUI application (despite the warnings):
+
 ```
 python src/app.py
 ```
@@ -105,7 +123,8 @@ python src/app.py
 - Real-time object detection and segmentation visualization
 - Option to export results
 
-**Note:** The GUI application is currently in beta and may have some limitations.
+**⚠️ RECOMMENDED APPROACH:**
+For stable evaluation and reliable results, use the command-line tools described in the following sections. They have been thoroughly tested and provide consistent, reproducible outcomes.
 
 ### Command-Line Usage
 
@@ -119,8 +138,14 @@ python src/create_demo_video.py --model yolov8n-seg --video path/to/video.mp4 --
 
 **Expected Output:**
 - Processed video file with visualized detections saved to specified output path
-- Performance statistics printed to console
-- If no output path is specified, video will be saved to `inference/output_videos/`
+  - Default: `inference/output_videos/[input_filename]_[model_name]_demo.mp4`
+  - Format: MP4 with H.264 encoding at original resolution and framerate
+  - Contents: Original video with overlaid object masks, bounding boxes, class names, and confidence scores
+- Performance summary saved to `inference/results/demo_performance_[timestamp].json`
+  - Contains average FPS, model info, and processing parameters
+- Console output showing:
+  - Processing progress (frames/second)
+  - Final statistics (total objects detected, processing time)
 
 Options:
 - `--model` or `-m`: Model type to use (default: yolov8n-seg)
@@ -174,15 +199,25 @@ python src/generate_dashboard.py --results path/to/results.json --output path/to
 ```
 
 **Expected Output:**
-- Interactive dashboard window (if --show is used)
-- Dashboard image saved to specified output path (or `inference/results/dashboard_[timestamp].png` by default)
-- Performance metrics displayed in a visually informative way
+- Interactive dashboard window (if `--show` is used)
+  - Contains multiple tabs for different analysis views
+  - Supports zoom, pan, and export functionality
+- Dashboard image saved to specified output path
+  - Default: `inference/results/dashboard_[timestamp].png`
+  - High-resolution (3840x2160) PNG file suitable for presentations
+- Performance metrics report saved to `inference/results/metrics_report_[timestamp].pdf`
+  - Detailed breakdown of all metrics with explanations
+  - Model comparison tables
+  - Size vs. performance analysis charts
+- Raw data export in CSV format at `inference/results/metrics_export_[timestamp].csv`
+  - Contains all numerical data for external analysis
 
 The dashboard provides:
 - mAP (mean Average Precision) scores across various IoU thresholds
 - Per-category performance analysis
 - Speed comparisons (FPS)
 - Size vs. performance tradeoffs
+- Confidence threshold sensitivity analysis
 
 Options:
 - `--results`: Path to evaluation results JSON file (uses latest if not specified)
@@ -194,12 +229,19 @@ Print a simple text-based summary of model performance metrics:
 
 **Command:**
 ```
-python src/print_model_summary.py
+python src/print_model_summary.py --results path/to/results.json --format [text|markdown|csv]
 ```
 
 **Expected Output:**
 - Formatted text table printed to console showing key metrics for all evaluated models
-- Uses the latest evaluation results file by default
+  - Includes mAP, F1-Score, object size performance, and speed metrics
+  - Models are sorted by overall performance by default
+- Optional output file (when using `--output` flag):
+  - Text format: `inference/results/model_summary_[timestamp].txt`
+  - Markdown format: `inference/results/model_summary_[timestamp].md`
+  - CSV format: `inference/results/model_summary_[timestamp].csv`
+  
+Command uses the latest evaluation results file by default if no specific file is provided.
 
 #### 5. Running a Complete Pipeline
 Run a complete evaluation, visualization, and demo video generation pipeline:
@@ -369,3 +411,21 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 The COCO dataset is used under the terms specified by its creators. See [cocodataset.org](https://cocodataset.org/) for more information.
 
 Model architectures are based on the original implementations by their respective authors, with appropriate citations in the code and report.
+
+## Development Status
+
+This project is under active development. Current implementation includes:
+
+- Support for multiple YOLO model families (YOLOv8, YOLOv9, YOLO11)
+- Comprehensive model evaluation framework
+- Reliable command-line interface for all operations
+- Interactive visualization dashboard
+- Demo video generation with object detection
+- Early alpha GUI interface (not recommended for evaluation)
+
+Future enhancements may include:
+- Stable GUI application with bug fixes and improved reliability
+- Camera integration for real-time processing
+- Additional model architectures
+- Enhanced visualization options
+- Cloud deployment options
