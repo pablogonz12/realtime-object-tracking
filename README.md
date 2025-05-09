@@ -3,6 +3,14 @@
 ## Project Overview
 This project implements a computer vision system for detecting and segmenting objects in videos and images. The system evaluates multiple state-of-the-art object detection and segmentation algorithms on the COCO dataset, analyzing their performance for validity, reliability, and objectivity.
 
+### Dataset Justification
+The COCO (Common Objects in Context) dataset was chosen as a representative dataset for this project due to its:
+- **Diversity**: Contains 80 common object categories covering a wide range of everyday scenarios
+- **Scale**: Includes over 200,000 labeled images with more than 1.5 million object instances
+- **Complexity**: Features objects in their natural contexts with varying scales, occlusions, and viewpoints
+- **Industry Standard**: Widely used benchmark in computer vision research, enabling direct comparison with state-of-the-art methods
+- **Transferability**: Performance on COCO generally translates well to real-world video applications, making it ideal for our object recognition task
+
 ### Key Features
 - Object detection and segmentation in videos
 - Performance evaluation of multiple models
@@ -10,13 +18,27 @@ This project implements a computer vision system for detecting and segmenting ob
 - Comprehensive metrics dashboard
 - Command-line interfaces for automation and scripting
 
-## Requirements
-- Python 3.8+ 
+## Requirements and Setup
+
+### Software Requirements
+- Python 3.8+ (tested with Python 3.8, 3.9, and 3.10)
 - PyTorch 1.10+
 - OpenCV 4.5+
 - CUDA-capable GPU (recommended for optimal performance)
+- 20GB+ free disk space for full dataset evaluation
 
-See `requirements.txt` for a complete list of dependencies.
+### System Requirements
+- 16GB+ RAM recommended
+- NVIDIA GPU with 4GB+ VRAM (8GB+ recommended for larger models)
+- Operating Systems: Windows 10/11, Ubuntu 20.04+, or macOS 12+
+
+### Dataset Preparation
+The COCO dataset is used for model evaluation and will be automatically downloaded when running the evaluation scripts for the first time. The dataset is managed by the `dataset_manager.py` module, which handles:
+- Downloading the validation set (~1GB)
+- Caching images for faster subsequent use
+- Organizing data for proper evaluation
+
+No manual dataset preparation is needed, but ensure you have sufficient disk space (~20GB for full dataset).
 
 ## Installation
 
@@ -31,10 +53,15 @@ cd computer-vision-project
 pip install -r requirements.txt
 ```
 
-3. Download pre-trained models (will be downloaded automatically when needed):
-```
-python src/models.py --download-models
-```
+## Detailed Analysis and Report
+
+For a comprehensive analysis of the State-of-the-Art models evaluated in this project, including:
+- Detailed qualitative comparison of each model
+- Analysis of performance in different conditions
+- Strengths and weaknesses of each approach
+- Recommendations for different use cases
+
+Please see our [detailed analysis report](REPORT.md).
 
 ## Usage
 
@@ -128,6 +155,9 @@ This project addresses Task #2 "Recognizing Objects in Video Sequences" by:
 2. Evaluating these algorithms on the COCO dataset for validity, reliability, and objectivity
 3. Generating quantitative metrics (mAP, FPS, etc.) and qualitative visualizations
 4. Creating demonstration videos showing object positions, shapes, and names
+
+### Shape Determination and Visualization
+Object "shape" is determined and visualized using the instance segmentation masks produced by the models. Unlike bounding box detection, these pixel-precise segmentation masks accurately outline the exact shape of each detected object, enabling more detailed analysis of object morphology, size, and orientation. The segmentation masks create a precise silhouette of objects that follows their actual contours rather than approximating them with rectangles.
 
 ### Implemented Models
 - YOLOv8 (various sizes)
