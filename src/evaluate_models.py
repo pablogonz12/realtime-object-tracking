@@ -30,12 +30,33 @@ from pycocotools.coco import COCO
 from pycocotools.cocoeval import COCOeval
 from pycocotools import mask as maskUtils
 
+# Import validation and error handling
+from src.validation import (
+    validate_file_path, validate_model_name, validate_confidence_threshold, 
+    validate_iou_threshold, validate_device, InvalidInputError
+)
+from src.error_handling import (
+    log_info, log_warning, log_error, log_exception, 
+    handle_exceptions, with_error_handling, print_friendly_error
+)
+
 # Import model manager
 try:
     from src.models import ModelManager, DEFAULT_MODEL_PATHS
 except ImportError:
     # If running directly from the src directory
     from models import ModelManager, DEFAULT_MODEL_PATHS
+    try:
+        from validation import (
+            validate_file_path, validate_model_name, validate_confidence_threshold, 
+            validate_iou_threshold, validate_device, InvalidInputError
+        )
+        from error_handling import (
+            log_info, log_warning, log_error, log_exception, 
+            handle_exceptions, with_error_handling, print_friendly_error
+        )
+    except ImportError:
+        pass  # Will use functions without error handling if not available
 
 # Configure paths
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -837,6 +858,63 @@ class ModelEvaluator:
             
         return metrics
 
+@with_error_handling("Error preparing COCO dataset")
+def prepare_coco_dataset(num_images=50, shuffle=True, seed=42):
+    """
+    Prepare the COCO dataset for evaluation.
+    
+    Args:
+        num_images: Number of images to use for evaluation
+        shuffle: Whether to shuffle the images
+        seed: Random seed for reproducibility
+        
+    Returns:
+        Tuple of (image_paths, image_ids)
+    """
+    # Validate inputs
+    if not isinstance(num_images, int) or num_images <= 0:
+        raise InvalidInputError(f"Number of images must be a positive integer, got {num_images}")
+    
+    # Ensure COCO directories exist
+    coco_dir = validate_file_path(COCO_VAL_DIR, must_exist=False)
+    coco_annot = validate_file_path(COCO_ANNOT_FILE, must_exist=False)
+    
+    if not coco_dir.exists() or not coco_annot.exists():
+        log_info(f"COCO dataset not found at {coco_dir}. Attempting to download...")
+        # This would normally call a download function
+        # Since we don't have that implemented, we'll just raise an error
+        raise InvalidInputError(
+            f"COCO dataset not available. Please download manually:\n"
+            f"1. Download val2017 images from https://cocodataset.org/\n"
+            f"2. Extract to {coco_dir}\n"
+            f"3. Download annotations from https://cocodataset.org/\n"
+            f"4. Extract to {coco_annot.parent}"
+        )
+    
+    # Load COCO annotations
+    try:
+        coco = COCO(str(coco_annot))
+    except Exception as e:
+        log_exception(e, "Failed to load COCO annotations")
+        raise InvalidInputError(f"Failed to load COCO annotations: {str(e)}")
+    
+    # Get image IDs
+    image_ids = list(sorted(coco.imgs.keys()))
+    
+    # Shuffle if needed
+    if shuffle:
+        np.random.seed(seed)
+        np.random.shuffle(image_ids)
+    
+    # Select subset of images
+    image_ids = image_ids[:num_images]
+    
+    # Get image paths
+    image_paths = [str(COCO_VAL_DIR / coco.loadImgs(img_id)[0]['file_name']) for img_id in image_ids]
+    
+    log_info(f"Prepared {len(image_paths)} COCO images for evaluation")
+    return image_paths, image_ids
+
 def main():
     # Parse command line arguments
     parser = argparse.ArgumentParser(description="Evaluate computer vision models on COCO validation set")
@@ -885,7 +963,7 @@ def main():
         # Check if all user-specified models were found and warn if not
         found_model_types = [m_config["type"] for m_config in selected_models_for_evaluation]
         for sm_type in user_selected_model_types:
-            if sm_type not in found_model_types:
+            if (sm_type not in found_model_types):
                 print(f"Warning: Specified model type '{sm_type}' not found in available model configurations. It will be skipped.")
     else:
         # No models specified by user, use default SoA models

@@ -120,6 +120,17 @@ except ImportError:
             
             return best_model, best_details
 
+# Import validation and error handling utilities
+from src.validation import (
+    validate_file_path, validate_model_name, validate_video,
+    validate_confidence_threshold, validate_iou_threshold,
+    validate_device, InvalidInputError
+)
+from src.error_handling import (
+    log_info, log_warning, log_error, log_exception,
+    handle_exceptions, with_error_handling, print_friendly_error
+)
+
 # Configure paths
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 VIDEO_DIR = PROJECT_ROOT / "data_sets" / "video_data" / "samples"
@@ -127,102 +138,110 @@ OUTPUT_DIR = PROJECT_ROOT / "inference" / "output_videos"
 RESULTS_DIR = PROJECT_ROOT / "inference" / "results"
 OUTPUT_DIR.mkdir(exist_ok=True, parents=True)
 
-def create_demo_video(model_type, video_path, output_path=None, model_path=None, config_path=None, progress_callback=None, 
-                     conf_threshold=0.25, iou_threshold=0.45):
+@with_error_handling("Error processing video with detections")
+def create_demo_video(
+    model_name="yolov8n-seg",
+    video_path=None,
+    output_path=None,
+    conf_threshold=0.25,
+    iou_threshold=0.45,
+    device=None,
+    show_progress=True
+):
     """
-    Create a demonstration video with object detection and segmentation overlay
+    Create a demo video with object detection and segmentation.
     
     Args:
-        model_type (str): Type of model to use ('mask-rcnn', 'yolo-seg')
-        video_path (str or Path): Path to input video file
-        output_path (str or Path, optional): Path to save output video file
-        model_path (str or Path, optional): Path to model weights file
-        config_path (str or Path, optional): Path to model configuration file
-        progress_callback (callable, optional): Callback function to report progress (frame_idx, total_frames)
-        conf_threshold (float): Confidence threshold for predictions (0-1)
-        iou_threshold (float): IoU threshold for NMS (0-1)
-    
-    Returns:
-        str: Path to the output video file
-    """
-    # Input validation
-    video_path = Path(video_path)
-    if not video_path.exists():
-        print(f"Error: Video file not found: {video_path}")
-        return None
-    
-    # Determine output path if not specified
-    if output_path is None:
-        output_filename = f"{video_path.stem}_{model_type}_demo.mp4"
-        output_path = OUTPUT_DIR / output_filename
-    else:
-        output_path = Path(output_path)
-    
-    # Determine model path if not specified
-    if model_path is None and model_type in DEFAULT_MODEL_PATHS:
-        model_path = DEFAULT_MODEL_PATHS[model_type]
-    
-    print(f"Processing video: {video_path}")
-    print(f"Using model: {model_type}")
-    print(f"Output will be saved to: {output_path}")
-    print(f"Detection thresholds: confidence={conf_threshold}, IoU={iou_threshold}")
-    
-    # Initialize model
-    try:
-        model_manager = ModelManager(
-            model_type, 
-            model_path, 
-            config_path,
-            conf_threshold=conf_threshold,
-            iou_threshold=iou_threshold
-        )
-        if model_manager.model_wrapper is None:
-            print(f"Error: Failed to initialize {model_type} model")
-            return None
-    except Exception as e:
-        print(f"Error initializing {model_type} model: {e}")
-        return None
-    
-    # Define callback for progress reporting
-    def processing_callback(frame, frame_count, total_frames, model_type, progress=None):
-        if progress_callback and total_frames > 0 and frame_count % 30 == 0:
-            progress_callback(frame_count, total_frames)
-        # Show console progress every 30 frames
-        if frame_count % 30 == 0:
-            progress = (frame_count / total_frames) * 100 if total_frames > 0 else 0
-            print(f"Progress: {progress:.1f}% (Frame {frame_count}/{total_frames})")
-    
-    # Process the video using the shared video utility
-    stats = process_video_with_model(
-        video_path=video_path,
-        model_manager=model_manager,
-        output_path=output_path,
-        callback=processing_callback,
-        stats_callback=None,
-        add_fps=True
-    )
-    
-    # Print summary statistics
-    print("\nVideo Processing Summary:")
-    print(f"- Total frames: {stats['frames_processed']} / {stats['total_frames']}")
-    print(f"- Total processing time: {stats['processing_time']:.2f}s")
-    print(f"- Average processing speed: {stats['actual_fps']:.2f} FPS")
-    
-    # Calculate and report detection statistics
-    total_detections = sum(stats['detections'].values())
-    print(f"- Total detections: {total_detections}")
-    print(f"- Average detections per frame: {total_detections / max(stats['frames_processed'], 1):.2f}")
-    
-    # Show detection classes
-    if stats['detections']:
-        classes = sorted(stats['detections'].keys())
-        print(f"- Detected classes: {', '.join(classes)}")
-    else:
-        print("- No detections found")
+        model_name: Name of the model to use
+        video_path: Path to the input video
+        output_path: Path to save the output video
+        conf_threshold: Confidence threshold for detections
+        iou_threshold: IoU threshold for NMS
+        device: Device to use for inference (cuda, cpu, mps)
+        show_progress: Whether to show progress bar
         
-    print(f"- Output video saved to: {output_path}")
-    
-    return str(output_path)
+    Returns:
+        Path to the output video
+    """
+    try:
+        # Validate inputs
+        manager = ModelManager()
+        available_models = manager.get_available_models()
+        
+        model_name = validate_model_name(model_name, available_models)
+        
+        if video_path is None:
+            # List available samples if no video provided
+            samples = list(VIDEO_SAMPLES_DIR.glob("*.mp4"))
+            if not samples:
+                raise InvalidInputError(
+                    "No sample videos found and no video path provided. "
+                    "Please provide a video path with --video."
+                )
+            video_path = samples[0]
+            log_info(f"No video path provided. Using sample: {video_path}")
+        
+        video_path = validate_video(video_path)
+        conf_threshold = validate_confidence_threshold(conf_threshold)
+        iou_threshold = validate_iou_threshold(iou_threshold)
+        
+        # Set default device if not provided
+        if device is None:
+            device = "cuda" if torch.cuda.is_available() else "cpu"
+        else:
+            device = validate_device(device)
+        
+        # Set default output path if not provided
+        if output_path is None:
+            video_name = Path(video_path).stem
+            output_path = str(OUTPUT_DIR / f"{video_name}_{model_name}_demo.mp4")
+        else:
+            output_path = str(validate_file_path(output_path, must_exist=False))
+            # Create parent directory if it doesn't exist
+            Path(output_path).parent.mkdir(exist_ok=True, parents=True)
+        
+        # Load model
+        log_info(f"Loading model: {model_name}")
+        model = manager.load_model(model_name, device=device)
+        
+        # Process video
+        log_info(f"Processing video: {video_path}")
+        cap, width, height, fps, frame_count = load_video(video_path)
+        
+        # Generate the output video with detections
+        output_path, stats = process_video_with_detections(
+            cap, model, manager, output_path,
+            conf_threshold=conf_threshold,
+            iou_threshold=iou_threshold,
+            show_progress=show_progress
+        )
+        
+        # Save performance summary
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        performance_file = RESULTS_DIR / f"demo_performance_{timestamp}.json"
+        
+        performance_data = {
+            "model_name": model_name,
+            "video_path": str(video_path),
+            "output_path": output_path,
+            "conf_threshold": conf_threshold,
+            "iou_threshold": iou_threshold,
+            "device": device,
+            "stats": stats,
+            "timestamp": timestamp
+        }
+        
+        with open(performance_file, "w") as f:
+            json.dump(performance_data, f, indent=2)
+        
+        log_info(f"Demo video created: {output_path}")
+        log_info(f"Performance summary saved: {performance_file}")
+        
+        return output_path
+        
+    except Exception as e:
+        log_exception(e, "Error in create_demo_video")
+        raise
 
 def find_best_model_from_evaluation():
     """Find the best model from the latest evaluation results"""

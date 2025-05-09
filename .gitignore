@@ -47,6 +47,10 @@ data_sets/image_data/*
 .DS_Store
 Thumbs.db
 
+# Logs
+logs/
+*.log
+
 # Inference evaluation outputs
 inference/results/
 inference/output_videos/
