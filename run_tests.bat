@@ -11,7 +11,7 @@ if not exist reports\coverage mkdir reports\coverage
 echo.
 echo Running basic tests first...
 echo --------------------------
-python tests/run_tests_fixed.py --type basic --verbose
+python tests/run_tests.py --type basic --verbose
 if %ERRORLEVEL% neq 0 (
     echo Basic tests failed! Fix these issues before continuing.
     pause
@@ -21,7 +21,7 @@ if %ERRORLEVEL% neq 0 (
 echo.
 echo Running unit tests...
 echo --------------------
-python tests/run_tests_fixed.py --type unit --verbose
+python tests/run_tests.py --type unit --verbose
 if %ERRORLEVEL% neq 0 (
     echo Unit tests failed!
     pause
@@ -31,7 +31,7 @@ if %ERRORLEVEL% neq 0 (
 echo.
 echo Running integration tests...
 echo --------------------------
-python tests/run_tests_fixed.py --type integration --skip-gpu --verbose
+python tests/run_tests.py --type integration --skip-gpu --verbose
 if %ERRORLEVEL% neq 0 (
     echo Integration tests failed!
     pause
@@ -41,7 +41,7 @@ if %ERRORLEVEL% neq 0 (
 echo.
 echo Generating coverage report...
 echo ----------------------------
-python tests/run_tests_fixed.py --type all --coverage --output reports/coverage
+python tests/run_tests.py --type all --coverage --output reports/coverage
 if %ERRORLEVEL% neq 0 (
     echo Coverage report generation failed!
     pause

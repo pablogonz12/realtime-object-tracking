@@ -11,7 +11,7 @@ mkdir -p reports/coverage
 echo ""
 echo "Running basic tests first..."
 echo "--------------------------"
-python tests/run_tests_fixed.py --type basic --verbose
+python tests/run_tests.py --type basic --verbose
 if [ $? -ne 0 ]; then
     echo "Basic tests failed! Fix these issues before continuing."
     exit 1
@@ -20,7 +20,7 @@ fi
 echo ""
 echo "Running unit tests..."
 echo "--------------------"
-python tests/run_tests_fixed.py --type unit --verbose
+python tests/run_tests.py --type unit --verbose
 if [ $? -ne 0 ]; then
     echo "Unit tests failed!"
     exit 1
@@ -29,7 +29,7 @@ fi
 echo ""
 echo "Running integration tests..."
 echo "--------------------------"
-python tests/run_tests_fixed.py --type integration --skip-gpu --verbose
+python tests/run_tests.py --type integration --skip-gpu --verbose
 if [ $? -ne 0 ]; then
     echo "Integration tests failed!"
     exit 1
@@ -38,7 +38,7 @@ fi
 echo ""
 echo "Generating coverage report..."
 echo "----------------------------"
-python tests/run_tests_fixed.py --type all --coverage --output reports/coverage
+python tests/run_tests.py --type all --coverage --output reports/coverage
 if [ $? -ne 0 ]; then
     echo "Coverage report generation failed!"
     exit 1

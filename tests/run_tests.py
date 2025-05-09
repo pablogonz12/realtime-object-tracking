@@ -78,8 +78,7 @@ def run_tests(test_type="all", skip_gpu=False, verbose=False, report=False, outp
         verbose: Whether to show verbose output
         report: Whether to generate a coverage report
         output: Path to save the report
-    """
-    # Compose the pytest command
+    """    # Compose the pytest command
     cmd = ["pytest"]
     
     # Add test type
@@ -88,7 +87,8 @@ def run_tests(test_type="all", skip_gpu=False, verbose=False, report=False, outp
         cmd.append("unit")
     elif test_type == "integration":
         cmd.append("-m")
-        cmd.append("integration")    elif test_type == "basic":
+        cmd.append("integration")
+    elif test_type == "basic":
         # Run specific basic test files that are known to exist
         basic_test_files = [
             "tests/test_error_handling_basic.py",
