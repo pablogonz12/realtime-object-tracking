@@ -867,39 +867,81 @@ def main():
 
     save_individual_visualizations = not args.no_vis # Renamed for clarity
 
-    # Filter models if specified
-    models_to_evaluate = MODELS_TO_EVALUATE
+    # Determine which models to evaluate
+    all_available_model_configs = MODELS_TO_EVALUATE # This is the full list from global scope
+      # Define default SoA models (ensure these keys exist in DEFAULT_MODEL_PATHS)
+    DEFAULT_SOA_MODELS = ["yolov9e-seg", "yolo11m-seg", "yolov8n-seg"]
+
+    selected_models_for_evaluation = []
+
     if args.models:
-        # Check if more than 3 models were selected
-        if len(args.models) > 3:
-            print(f"Warning: You selected {len(args.models)} models, but there is a limit of 3 models per evaluation.")
-            print(f"Only the first 3 models will be evaluated: {', '.join(args.models[:3])}")
-            selected_models = args.models[:3]  # Limit to first 3 models
-        else:
-            selected_models = args.models
-            
-        models_to_evaluate = [m for m in MODELS_TO_EVALUATE if m["type"] in selected_models]
-        print(f"Evaluating selected models: {', '.join([m['type'] for m in models_to_evaluate])}")
-    # Enforce the 3-model limit even if no specific models were selected
-    elif len(models_to_evaluate) > 3:
-        print(f"Note: Limiting evaluation to 3 models as per current settings.")
-        print(f"Selected models: {', '.join([m['type'] for m in models_to_evaluate[:3]])}")
-        models_to_evaluate = models_to_evaluate[:3]
+        # User specified models
+        user_selected_model_types = args.models
+        print(f"Evaluating user-specified models: {', '.join(user_selected_model_types)}")
+        
+        # Filter the full list of available model configs based on user selection
+        selected_models_for_evaluation = [m_config for m_config in all_available_model_configs if m_config["type"] in user_selected_model_types]
+        
+        # Check if all user-specified models were found and warn if not
+        found_model_types = [m_config["type"] for m_config in selected_models_for_evaluation]
+        for sm_type in user_selected_model_types:
+            if sm_type not in found_model_types:
+                print(f"Warning: Specified model type '{sm_type}' not found in available model configurations. It will be skipped.")
+    else:
+        # No models specified by user, use default SoA models
+        print(f"No models specified via --models argument. Evaluating default SoA models: {', '.join(DEFAULT_SOA_MODELS)}")
+        selected_models_for_evaluation = [m_config for m_config in all_available_model_configs if m_config["type"] in DEFAULT_SOA_MODELS]
+        
+        # Verify that default models were found
+        if len(selected_models_for_evaluation) < len(DEFAULT_SOA_MODELS):
+            found_default_types = [m_config["type"] for m_config in selected_models_for_evaluation]
+            missing_defaults = [m_type for m_type in DEFAULT_SOA_MODELS if m_type not in found_default_types]
+            if missing_defaults:
+                print(f"Warning: The following default SoA models were not found in available model configurations and will be skipped: {', '.join(missing_defaults)}")
+        
+        if not selected_models_for_evaluation: # If even after trying defaults, none are available
+             print(f"Error: None of the default SoA models ({', '.join(DEFAULT_SOA_MODELS)}) are available in the current model configurations.")
+             available_model_names_from_configs = [m_config["type"] for m_config in all_available_model_configs]
+             print(f"Available models are: {', '.join(available_model_names_from_configs) if available_model_names_from_configs else 'None'}")
+             sys.exit(1)
+
+    if not selected_models_for_evaluation:
+        print("Error: No models selected or available for evaluation. Exiting.")
+        available_model_names_from_configs = [m_config["type"] for m_config in all_available_model_configs]
+        print(f"Available models are: {', '.join(available_model_names_from_configs) if available_model_names_from_configs else 'None'}")
+        sys.exit(1)
+
+    print(f"Final list of models to evaluate: {', '.join([m['type'] for m in selected_models_for_evaluation])}")
 
     # Add confidence and IoU thresholds to model configs
-    for model_config in models_to_evaluate:
+    for model_config in selected_models_for_evaluation:
         model_config["conf_threshold"] = args.conf_threshold
         model_config["iou_threshold"] = args.iou_threshold
 
     print("Starting model evaluation...")
 
-    # Create evaluator with possibly filtered models list
-    evaluator = ModelEvaluator(models_to_evaluate)
+    # Create evaluator with the determined list of models
+    evaluator = ModelEvaluator(selected_models_for_evaluation)
 
     # Run evaluation
     evaluator.run_evaluation(max_images, save_individual_visualizations)
 
-    print("Evaluation complete!")
+    print("Evaluation complete!")    # Print a formatted summary table to the terminal
+    try:
+        # Try to import our summary table module
+        try:
+            from print_model_summary import print_summary_table
+        except ImportError:
+            from src.print_model_summary import print_summary_table
+            
+        # Print the summary table
+        print_summary_table()
+    except ImportError as e:
+        print(f"Warning: Could not import summary table module: {e}")
+    except Exception as e:
+        print(f"Error printing summary table: {e}")
+        import traceback
+        traceback.print_exc()
 
     # Always generate the metrics dashboard after evaluation
     print("\nGenerating metrics dashboard...")

@@ -65,15 +65,33 @@ Options:
 - `--iou-threshold`: IoU threshold for NMS (default: 0.45)
 
 #### 2. Evaluating Models
-Evaluate models on the COCO dataset:
+Evaluate models on the COCO dataset. 
+
+If no models are specified using the `--models` argument, three default State-of-the-Art (SoA) models (`yolov8n-seg`, `yolov8x-seg`, `yolov9e-seg`) will be evaluated. You can specify any number of models from the available list to evaluate them.
+
+**Default SoA Models Justification:**
+These three models were chosen to provide a representative sample of current SoA capabilities, balancing performance, speed, and architectural variety:
+-   `yolov9e-seg`: An extended version from the YOLOv9 family, typically offering the highest accuracy and representing the cutting edge in the YOLO series, suitable for scenarios where performance is the top priority.
+-   `yolo11m-seg`: A medium-sized model from the YOLOv11 family, aimed at providing a good balance between accuracy and inference speed, making it a versatile choice for various applications.
+-   `yolov8n-seg`: A nano version from the YOLOv8 family, optimized for very high speed and minimal resource consumption, ideal for real-time applications on edge devices or where computational power is limited.
+
+This selection allows for a comparison across different model generations (YOLOv8, YOLOv9, YOLOv11) and sizes, highlighting trade-offs between performance, speed, and resource requirements.
 
 ```
-python src/evaluate_models.py --images 100 --models yolov8n-seg yolov8s-seg yolov8m-seg
+python src/evaluate_models.py --images 100 
+```
+To evaluate specific models (e.g., two models):
+```
+python src/evaluate_models.py --images 100 --models yolov8s-seg yolov9c-seg
+```
+To evaluate more than three models:
+```
+python src/evaluate_models.py --images 100 --models yolov8n-seg yolov8s-seg yolov8m-seg yolov8l-seg
 ```
 
 Options:
 - `--images`: Number of COCO validation images to use (default: 50)
-- `--models`: Specific models to evaluate (up to 3)
+- `--models`: Specific models to evaluate (e.g., `yolov8n-seg yolov8s-seg`). If not provided, the three default SoA models are used. Accepts one or more model names.
 - `--no-vis`: Skip saving individual detection visualizations
 - `--conf-threshold`: Confidence threshold (default: 0.25)
 - `--iou-threshold`: IoU threshold (default: 0.45)
