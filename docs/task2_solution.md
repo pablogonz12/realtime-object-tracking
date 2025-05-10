@@ -28,6 +28,23 @@ Object "shape" is determined and visualized using the instance segmentation mask
 - YOLO11 (various sizes)
 - Mask R-CNN
 
+## Available Models for Evaluation
+
+The following model names can be used with the `--models` argument in evaluation scripts (e.g., `src/evaluate_models.py`):
+
+- `yolov8n-seg`
+- `yolov8s-seg`
+- `yolov8m-seg`
+- `yolov8l-seg`
+- `yolov8x-seg`
+- `yolov9c-seg`
+- `yolov9e-seg`
+- `yolov11n-seg`
+- `yolov11s-seg`
+- `yolov11m-seg`
+- `yolov11l-seg`
+- `yolov11x-seg`
+
 ## Reproducing the Full Task #2 Pipeline
 To reproduce the complete pipeline for Task #2, follow these steps in order:
 
@@ -36,7 +53,8 @@ To reproduce the complete pipeline for Task #2, follow these steps in order:
 python -c "import torch; print(f'PyTorch version: {torch.__version__}, CUDA available: {torch.cuda.is_available()}')"
 
 # Step 2: Evaluate models (this will download models and dataset if not present)
-python src/evaluate_models.py --images 200 --models yolov8n-seg yolov8m-seg yolov8x-seg
+# Models updated to yolov9e-seg, yolov11m-seg, and yolov8n-seg
+python src/evaluate_models.py --images 200 --models yolov9e-seg yolov11m-seg yolov8n-seg
 
 # Step 3: Generate and display metrics dashboard
 python src/generate_dashboard.py --show
