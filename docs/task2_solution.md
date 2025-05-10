@@ -26,7 +26,6 @@ Object "shape" is determined and visualized using the instance segmentation mask
 - YOLOv8 (various sizes)
 - YOLOv9 (various sizes)
 - YOLO11 (various sizes)
-- Mask R-CNN
 
 ## Available Models for Evaluation
 
