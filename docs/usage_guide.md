@@ -1,6 +1,36 @@
 # Usage and Expected Outputs
 
-This section outlines the main scripts, their purposes, and what outputs to expect from each.
+This guide provides instructions on how to use the various components of the Computer Vision Project, including setting up the necessary data and models, running command-line tools, and using the GUI application.
+
+## Prerequisites and Setup
+
+Before you can run the scripts or the application, ensure you have completed the following setup steps:
+
+1.  **Python Environment and Dependencies:**
+    *   Make sure you have Python installed (version 3.8 or higher is recommended).
+    *   Install all required project dependencies by running:
+        ```bash
+        pip install -r requirements.txt
+        ```
+    *   For detailed installation instructions, please refer to `docs/setup_installation.md`.
+
+2.  **Downloading Models:**
+    *   The object detection models (e.g., YOLOv8, YOLOv9) are generally downloaded automatically by the underlying libraries (like Ultralytics) when a script or the GUI requests a specific model for the first time.
+    *   These models are typically cached in a standard directory used by the library (e.g., `~/AppData/Local/Ultralytics` on Windows or `~/.cache/Ultralytics` on Linux/macOS).
+    *   If the project uses a custom model management system, pre-trained model files (`.pt` files) might be expected in the `models/pts/` directory. If a specific model is not found, the scripts will attempt to download it.
+
+3.  **Downloading Datasets (COCO for Evaluation):**
+    *   The `evaluate_models.py` script and evaluation features in the GUI rely on the COCO (Common Objects in Context) dataset.
+    *   If the COCO dataset is not found in the expected location (typically within the `data_sets/` directory, e.g., `data_sets/coco/`), the `DatasetManager` (invoked by the evaluation scripts or GUI) should automatically attempt to download and extract it. This can be a large download (several gigabytes) and may take a significant amount of time.
+    *   The `DatasetManager` is responsible for organizing the dataset into the correct structure (e.g., `data_sets/coco/images/val2017/` and `data_sets/coco/annotations/instances_val2017.json`).
+    *   You can also manually download the COCO 2017 validation images and annotations and place them in the appropriate subdirectories within `data_sets/coco/` if you prefer or if automatic download fails.
+        *   COCO 2017 Val Images: [http://images.cocodataset.org/zips/val2017.zip](http://images.cocodataset.org/zips/val2017.zip)
+        *   COCO 2017 Annotations: [http://images.cocodataset.org/annotations/annotations_trainval2017.zip](http://images.cocodataset.org/annotations/annotations_trainval2017.zip) (extract `instances_val2017.json` from this).
+
+4.  **Sample Videos and Images:**
+    *   The project may include sample videos in `data_sets/video_data/` and sample images in `data_sets/image_data/`. You can use these for testing or provide your own.
+
+Once these prerequisites are met, you can proceed to use the command-line tools or the GUI application.
 
 ## GUI Application (Beta Version)
 
@@ -34,12 +64,24 @@ For stable evaluation and reliable results, use the command-line tools described
 
 ## Command-Line Usage
 
-### 1. Creating Demo Videos
-Process a video with object detection/segmentation:
+This section details each command-line script, its purpose, generic syntax, and runnable examples.
 
-**Command:**
+### 1. Creating Demo Videos
+Process a video with object detection/segmentation to generate a demonstration video.
+
+**Generic Command:**
+```bash
+python src/create_demo_video.py --model <model_name> --video <path_to_input_video> --output <path_to_output_video> [options]
 ```
-python src/create_demo_video.py --model yolov8n-seg --video path/to/video.mp4 --output path/to/output.mp4
+
+**Runnable Example (default model, specific video):**
+```bash
+python src/create_demo_video.py --video data_sets/video_data/people-detection.mp4 --output inference/output_videos/people_detection_default_model_demo.mp4
+```
+
+**Runnable Example (specific model, video, and output):**
+```bash
+python src/create_demo_video.py --model yolov8s-seg --video data_sets/video_data/sample_video.mp4 --output inference/output_videos/sample_video_yolov8s_demo.mp4 --conf-threshold 0.3
 ```
 
 **Expected Output:**
@@ -61,16 +103,21 @@ Options:
 - `--iou-threshold`: IoU threshold for NMS (default: 0.45)
 
 ### 2. Evaluating Models
-Evaluate models on the COCO dataset. 
+Evaluate object detection/segmentation models on the COCO dataset. Assumes COCO dataset is set up (see Prerequisites).
 
-**Command (default models):**
-```
-python src/evaluate_models.py --images 100 
+**Generic Command:**
+```bash
+python src/evaluate_models.py [--images <num_images>] [--models <model1_name> <model2_name>...] [options]
 ```
 
-**Command (specific models):**
+**Runnable Example (evaluate default SoA models on 50 images):**
+```bash
+python src/evaluate_models.py --images 50
 ```
-python src/evaluate_models.py --images 100 --models yolov8s-seg yolov9c-seg
+
+**Runnable Example (evaluate specific models on 100 images):**
+```bash
+python src/evaluate_models.py --images 100 --models yolov8n-seg yolov8s-seg
 ```
 
 **Expected Output:**
@@ -97,11 +144,21 @@ Options:
 - `--iou-threshold`: IoU threshold (default: 0.45)
 
 ### 3. Generating Metrics Dashboard
-Generate a comprehensive performance dashboard:
+Generate a comprehensive performance dashboard from evaluation results.
 
-**Command:**
+**Generic Command:**
+```bash
+python src/generate_dashboard.py [--results <path_to_results_json>] [--output <path_to_dashboard_png>] [--show]
 ```
-python src/generate_dashboard.py --results path/to/results.json --output path/to/dashboard.png
+
+**Runnable Example (generate from latest results, save to default, and show interactively):**
+```bash
+python src/generate_dashboard.py --show
+```
+
+**Runnable Example (generate from latest results, specify output PNG file):**
+```bash
+python src/generate_dashboard.py --output inference/results/visualizations/custom_metrics_dashboard.png
 ```
 
 **Expected Output:**
@@ -131,30 +188,41 @@ Options:
 - `--show`: Display dashboard interactively
 
 ### 4. Printing Summary Table
-Print a simple text-based summary of model performance metrics:
+Print a simple text-based summary of model performance metrics from evaluation results.
 
-**Command:**
-```
-python src/print_model_summary.py --results path/to/results.json --format [text|markdown|csv]
+**Generic Command:**
+```bash
+python src/print_model_summary.py [--results <path_to_results_json>] [--format <text|markdown|csv>] [--output <path_to_output_file>]
 ```
 
-**Expected Output:**
-- Formatted text table printed to console showing key metrics for all evaluated models
-  - Includes mAP, F1-Score, object size performance, and speed metrics
-  - Models are sorted by overall performance by default
-- Optional output file (when using `--output` flag):
-  - Text format: `inference/results/model_summary_[timestamp].txt`
-  - Markdown format: `inference/results/model_summary_[timestamp].md`
-  - CSV format: `inference/results/model_summary_[timestamp].csv`
+**Runnable Example (print summary of latest results to console in text format):**
+```bash
+python src/print_model_summary.py
+```
+
+**Runnable Example (save summary of latest results to a Markdown file):**
+```bash
+python src/print_model_summary.py --format markdown --output inference/results/model_summary_report.md
+```
   
 Command uses the latest evaluation results file by default if no specific file is provided.
 
 ### 5. Running a Complete Pipeline
-Run a complete evaluation, visualization, and demo video generation pipeline:
+Run a complete pipeline: evaluation, visualization, and demo video generation.
 
-**Command:**
+**Generic Command:**
+```bash
+python src/pipeline.py [--images <num_images>] [--models <model1_name> <model2_name>...] [--demo-video <path_to_video>] [--output-dir <path_to_output_directory>]
 ```
-python src/pipeline.py --images 100 --models yolov8n-seg yolov8s-seg --demo-video path/to/video.mp4
+
+**Runnable Example (run pipeline with specified models and video):**
+```bash
+python src/pipeline.py --images 50 --models yolov8n-seg yolov8s-seg --demo-video data_sets/video_data/people-detection.mp4 --output-dir inference/pipeline_outputs
+```
+
+**Runnable Example (run pipeline with minimal options, using some defaults):**
+```bash
+python src/pipeline.py --models yolov8n-seg --demo-video data_sets/video_data/sample_video.mp4
 ```
 
 **Expected Output:**
@@ -164,79 +232,76 @@ python src/pipeline.py --images 100 --models yolov8n-seg yolov8s-seg --demo-vide
 - Processed demo video with the best-performing model
 - Summary table printed to console
 
-Options:
-- `--images`: Number of images for evaluation (default: 50)
-- `--models`: Models to evaluate (default: top 3 by size)
-- `--demo-video`: Video to process with best model (optional)
-- `--output-dir`: Directory to save outputs (optional)
-
 # Usage Guide
+
+This section provides a collection of ready-to-use command-line examples for common tasks. Ensure you have met the prerequisites (Python environment, dependencies, and potentially datasets/models as described earlier).
 
 ## Command-Line Interface (Recommended)
 
-This project provides several command-line tools for model evaluation, visualization, and video processing.
+This project provides several command-line tools for model evaluation, visualization, and video processing. The following examples are designed to be runnable.
 
 ### Evaluating Models
 
+Assumes the COCO dataset is available or can be downloaded.
+
 ```bash
-# Evaluate all supported models on COCO dataset
-python src/evaluate_models.py
+# Evaluate default SoA models on a small set of COCO images (e.g., 50)
+python src/evaluate_models.py --images 50
 
-# Evaluate specific models
-python src/evaluate_models.py --models yolov8n-seg yolov8s-seg
+# Evaluate specific models (e.g., yolov8n-seg, yolov8s-seg) on 100 COCO images
+python src/evaluate_models.py --models yolov8n-seg yolov8s-seg --images 100
 
-# Limit evaluation to fewer images for faster results
-python src/evaluate_models.py --images 100
+# Adjust batch size if you encounter memory issues (e.g., to 4)
+python src/evaluate_models.py --batch-size 4 --images 50
 
-# Adjust batch size for memory constraints
-python src/evaluate_models.py --batch-size 4
-
-# Full options
-python src/evaluate_models.py --models yolov8n-seg yolov8s-seg --images 1000 --batch-size 8 --confidence 0.25 --iou 0.45 --device cuda
+# Example with more options specified, using CUDA if available
+python src/evaluate_models.py --models yolov8n-seg --images 200 --batch-size 8 --confidence 0.25 --iou 0.45 --device cuda
 ```
 
 ### Creating Demo Videos
 
+Assumes sample videos like `data_sets/video_data/people-detection.mp4` and `data_sets/video_data/sample_video.mp4` exist.
+
 ```bash
-# Create a demo video using the default model
-python src/create_demo_video.py --video path/to/your/video.mp4
+# Create a demo video using the default model and a sample video
+python src/create_demo_video.py --video data_sets/video_data/people-detection.mp4 --output inference/output_videos/people_detection_default_demo.mp4
 
-# Use the best model from evaluations
-python src/create_demo_video.py --best-model --video path/to/your/video.mp4
+# Use the best model from prior evaluations (if available) on a sample video
+python src/create_demo_video.py --best-model --video data_sets/video_data/sample_video.mp4 --output inference/output_videos/sample_video_best_model_demo.mp4
 
-# Specify model and output location
-python src/create_demo_video.py --model yolov8n-seg --video input.mp4 --output my_output_video.mp4
+# Specify a model (e.g., yolov8s-seg), a sample video, and an output location
+python src/create_demo_video.py --model yolov8s-seg --video data_sets/video_data/people-detection.mp4 --output inference/output_videos/people_detection_yolov8s_demo.mp4
 
-# Adjust detection parameters
-python src/create_demo_video.py --model yolov8n-seg --video input.mp4 --conf-threshold 0.4 --iou-threshold 0.5
-
-# Example with a specific video and model from the project structure
-# Replace 'yolov8s-seg' with an actual model name and 
-# 'data_sets/video_data/sample_video.mp4' with an actual video path from your project.
-python src/create_demo_video.py --model yolov8n-seg --video data_sets/video_data/people-detection.mp4 --output inference/output_videos/sample_video_yolov8n_demo.mp4
+# Adjust detection parameters for a specific model and video
+python src/create_demo_video.py --model yolov8n-seg --video data_sets/video_data/sample_video.mp4 --conf-threshold 0.4 --iou-threshold 0.5 --output inference/output_videos/sample_video_yolov8n_custom_params_demo.mp4
 ```
 
 ### Generating Visualizations
 
+Assumes model evaluations have been run and `evaluation_results_*.json` files exist in `inference/results/`.
+
 ```bash
-# Generate performance visualization dashboard for all evaluated models
-python src/generate_dashboard.py
+# Generate and show the performance visualization dashboard using the latest results
+python src/generate_dashboard.py --show
 
-# Generate dashboard from a specific results file
-python src/generate_dashboard.py --results-file inference/results/evaluation_results_20230615.json
-
-# Compare specific models side by side
-python src/compare_models.py --models yolov8n-seg yolov8s-seg yolov9c-seg
+# Generate a dashboard from a specific (example) results file and save it
+# (Replace YYYYMMDD_HHMMSS with an actual timestamp from your results file if needed)
+python src/generate_dashboard.py --results-file inference/results/evaluation_results_YYYYMMDD_HHMMSS.json --output inference/results/visualizations/dashboard_from_specific_file.png
 ```
 
 ### Viewing Model Summary
 
+Assumes model evaluations have been run and `evaluation_results_*.json` files exist.
+
 ```bash
-# Print a summary of all available models and their stats
+# Print a summary of model stats from the latest evaluation to the console
 python src/print_model_summary.py
 
-# View summary for specific models
+# View summary for specific models from the latest evaluation
 python src/print_model_summary.py --models yolov8n-seg yolov8s-seg
+
+# Save the summary for all models from the latest evaluation to a Markdown file
+python src/print_model_summary.py --format markdown --output inference/results/latest_model_summary.md
 ```
 
 ## GUI Application (Alpha)
