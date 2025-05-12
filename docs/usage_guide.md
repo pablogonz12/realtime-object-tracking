@@ -209,6 +209,11 @@ python src/create_demo_video.py --model yolov8n-seg --video input.mp4 --output m
 
 # Adjust detection parameters
 python src/create_demo_video.py --model yolov8n-seg --video input.mp4 --conf-threshold 0.4 --iou-threshold 0.5
+
+# Example with a specific video and model from the project structure
+# Replace 'yolov8s-seg' with an actual model name and 
+# 'data_sets/video_data/sample_video.mp4' with an actual video path from your project.
+python src/create_demo_video.py --model yolov8n-seg --video data_sets/video_data/people-detection.mp4 --output inference/output_videos/sample_video_yolov8n_demo.mp4
 ```
 
 ### Generating Visualizations

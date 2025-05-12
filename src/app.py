@@ -2354,6 +2354,12 @@ class GraphicalGUI:
             messagebox.showerror("Error", "No video selected or video file not found. Please select a valid video.")
             return
 
+        # Stop any running video preview to prevent interference with progress display
+        self.stop_preview = True
+        if hasattr(self, 'video_thread') and self.video_thread and self.video_thread.is_alive():
+            # Wait briefly for the video preview thread to terminate
+            self.video_thread.join(timeout=0.5)
+
         self.status_var.set(f"Generating video with {selected_model} on {selected_video.name}...")
         self._display_operation_status_on_canvas("Preparing...", f"Using model: {selected_model}\nVideo: {selected_video.name}")
 
