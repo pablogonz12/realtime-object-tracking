@@ -2,14 +2,12 @@
 Error handling and logging utilities for the Computer Vision Project.
 Provides functions to log errors and handle them gracefully.
 """
-
-import os
-import sys
-import logging
-import traceback
+import logging # Added import
 from datetime import datetime
 from pathlib import Path
 from typing import Optional, Any, Dict, List, Union, Callable
+import functools # Added for decorators
+import sys # Added for sys.exit
 
 # Configure logging
 LOG_DIR = Path("logs")
@@ -39,130 +37,109 @@ logger.addHandler(console_handler)
 
 
 def log_info(message: str) -> None:
-    """Log an informational message"""
+    """Logs an informational message."""
     logger.info(message)
 
 
 def log_warning(message: str) -> None:
-    """Log a warning message"""
+    """Logs a warning message."""
     logger.warning(message)
 
 
 def log_error(message: str, exc_info: bool = False) -> None:
-    """Log an error message"""
+    """Logs an error message.
+
+    Args:
+        message (str): The error message.
+        exc_info (bool): If True, exception information is added to the log.
+    """
     logger.error(message, exc_info=exc_info)
 
 
 def log_exception(e: Exception, context: Optional[str] = None) -> None:
-    """
-    Log an exception with context.
-    
+    """Logs an exception with optional context.
+
     Args:
-        e: The exception to log
-        context: Optional context string to include in the log
+        e (Exception): The exception to log.
+        context (Optional[str]): Additional context about where the exception occurred.
     """
     if context:
-        logger.error(f"{context}: {str(e)}", exc_info=True)
+        logger.exception(f"Exception occurred in {context}: {e}")
     else:
-        logger.error(str(e), exc_info=True)
+        logger.exception(f"An exception occurred: {e}")
 
 
 def handle_exceptions(func: Callable) -> Callable:
     """
-    Decorator to handle exceptions in functions.
-    Logs the exception and raises a friendly error message.
-    
-    Args:
-        func: Function to wrap
-        
-    Returns:
-        Wrapped function that handles exceptions
+    A decorator that wraps a function to catch and log any exceptions.
     """
+    @functools.wraps(func)
     def wrapper(*args, **kwargs):
         try:
             return func(*args, **kwargs)
         except Exception as e:
-            # Log the exception
-            log_exception(e, f"Error in {func.__name__}")
-            
-            # Re-raise with a more user-friendly message
-            raise type(e)(f"Error in {func.__name__}: {str(e)}") from e
-    
+            log_exception(e, context=func.__name__)
+            # Optionally, re-raise the exception or return a default value
+            # For now, we'll just log and let it propagate or be handled by outer layers
+            raise
     return wrapper
 
 
 def with_error_handling(message: str = "An error occurred") -> Callable:
     """
-    More configurable decorator for exception handling.
-    
-    Args:
-        message: Custom error message prefix
-        
-    Returns:
-        Decorator function
+    A decorator factory that wraps a function to catch exceptions and log a custom message.
     """
-    def decorator(func):
+    def decorator(func: Callable) -> Callable:
+        @functools.wraps(func)
         def wrapper(*args, **kwargs):
             try:
                 return func(*args, **kwargs)
             except Exception as e:
-                # Log the exception
-                log_exception(e, f"{message} in {func.__name__}")
-                
-                # Re-raise with a more user-friendly message
-                raise type(e)(f"{message} in {func.__name__}: {str(e)}") from e
-        
+                log_error(f"{message} in {func.__name__}: {e}", exc_info=True)
+                # Optionally, re-raise or return a default
+                raise
         return wrapper
-    
     return decorator
 
 
 def robust_function(fallback_value: Any = None) -> Callable:
     """
-    Decorator for functions that should never crash.
-    Returns a fallback value if an exception occurs.
-    
-    Args:
-        fallback_value: Value to return if an exception occurs
-        
-    Returns:
-        Decorator function
+    A decorator factory that makes a function robust by catching exceptions
+    and returning a fallback value.
     """
-    def decorator(func):
+    def decorator(func: Callable) -> Callable:
+        @functools.wraps(func)
         def wrapper(*args, **kwargs):
             try:
                 return func(*args, **kwargs)
             except Exception as e:
-                # Log the exception
-                log_exception(e, f"Error in {func.__name__} (fallback used)")
-                
-                # Return the fallback value
+                log_exception(e, context=f"Robust call to {func.__name__}")
                 return fallback_value
-        
         return wrapper
-    
     return decorator
 
 
 def print_friendly_error(e: Exception, exit_code: Optional[int] = None) -> None:
     """
-    Print a user-friendly error message and optionally exit.
-    
+    Prints a user-friendly error message to the console and logs the full exception.
+    Optionally exits the program.
+
     Args:
-        e: The exception to print
-        exit_code: If provided, the program will exit with this code
+        e (Exception): The exception that occurred.
+        exit_code (Optional[int]): If provided, the program will exit with this code.
     """
-    from src.validation import CVProjectError
+    error_type = type(e).__name__
+    error_message = str(e)
     
-    # Different handling for different error types
-    if isinstance(e, CVProjectError):
-        # These are our custom errors with friendly messages
-        print(f"\nError: {str(e)}")
-    else:
-        # Generic errors get a more technical message
-        print(f"\nAn unexpected error occurred: {str(e)}")
-        print("See the log file for more details.")
+    friendly_message = f"Oops! Something went wrong ({error_type})."
+    if error_message:
+        friendly_message += f"\nDetails: {error_message}"
     
-    # Exit if requested
+    print(f"\n❌ {friendly_message}")
+    print("Please check the logs for more detailed information.")
+    
+    log_exception(e, context="User-facing error")
+    
     if exit_code is not None:
+        print(f"Exiting with code {exit_code}.")
         sys.exit(exit_code)

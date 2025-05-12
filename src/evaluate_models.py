@@ -30,19 +30,28 @@ from pycocotools.coco import COCO
 from pycocotools.cocoeval import COCOeval
 from pycocotools import mask as maskUtils
 
+# Add the src directory to sys.path to allow for absolute imports from src
+# This is useful when running scripts directly from the src directory or subdirectories
+# And ensures that modules like print_model_summary can be found
+current_script_path = Path(__file__).resolve()
+project_root = current_script_path.parent.parent # Assuming evaluate_models.py is in src, so two .parent calls to get to project root
+src_path = project_root / "src"
+if str(src_path) not in sys.path:
+    sys.path.insert(0, str(src_path))
+
 # Import validation and error handling
-from src.validation import (
+from validation import (
     validate_file_path, validate_model_name, validate_confidence_threshold, 
     validate_iou_threshold, validate_device, InvalidInputError
 )
-from src.error_handling import (
+from error_handling import (
     log_info, log_warning, log_error, log_exception, 
     handle_exceptions, with_error_handling, print_friendly_error
 )
 
 # Import model manager
 try:
-    from src.models import ModelManager, DEFAULT_MODEL_PATHS
+    from models import ModelManager, DEFAULT_MODEL_PATHS
 except ImportError:
     # If running directly from the src directory
     from models import ModelManager, DEFAULT_MODEL_PATHS
@@ -95,17 +104,17 @@ class ModelEvaluator:
         if COCO_ANNOT_FILE.exists():
             with open(COCO_ANNOT_FILE, 'r') as f:
                 self.coco_gt = json.load(f)
-            print(f"Loaded COCO annotations from {COCO_ANNOT_FILE}")
+            log_info(f"Loaded COCO annotations from {COCO_ANNOT_FILE}")
             
             # Initialize COCO API for annotations
             try:
                 self.coco_gt_api = COCO(COCO_ANNOT_FILE)
-                print(f"Successfully initialized COCO API with {len(self.coco_gt_api.getImgIds())} images")
-                print(f"Found {len(self.coco_gt_api.getCatIds())} categories in annotations")
+                log_info(f"Successfully initialized COCO API with {len(self.coco_gt_api.getImgIds())} images")
+                log_info(f"Found {len(self.coco_gt_api.getCatIds())} categories in annotations")
             except Exception as e:
-                print(f"Warning: Failed to initialize COCO API: {e}")
+                log_warning(f"Warning: Failed to initialize COCO API: {e}")
         else:
-            print(f"Warning: COCO annotations file not found at {COCO_ANNOT_FILE}")
+            log_warning(f"Warning: COCO annotations file not found at {COCO_ANNOT_FILE}")
     
     def load_coco_val_images(self, max_images=100):
         """
@@ -119,28 +128,28 @@ class ModelEvaluator:
         """
         # Check if we have the COCO dataset
         if not COCO_VAL_DIR.exists() or not COCO_ANNOT_FILE.exists():
-            print(f"COCO dataset not found. Downloading {max_images} images...")
+            log_info(f"COCO dataset not found. Downloading {max_images} images...")
             try:
                 # Import and use DatasetManager to download the dataset
                 from data_sets.dataset_manager import DatasetManager
                 dataset_manager = DatasetManager()
                 dataset_manager.setup_coco(subset_size=max_images)
-                print("Dataset download complete. Now loading images...")
+                log_info("Dataset download complete. Now loading images...")
             except Exception as e:
-                print(f"Error downloading dataset: {e}")
+                log_error(f"Error downloading dataset: {e}")
                 import traceback
                 traceback.print_exc()
                 return []
                 
         if not COCO_VAL_DIR.exists():
-            print(f"Error: COCO validation directory not found at {COCO_VAL_DIR}")
+            log_error(f"Error: COCO validation directory not found at {COCO_VAL_DIR}")
             return []
         
         # If COCO API is initialized, use it to get image IDs
         if self.coco_gt_api:
-            print("Using COCO API to get image IDs")
+            log_info("Using COCO API to get image IDs")
             image_ids = sorted(self.coco_gt_api.getImgIds())[:max_images]
-            print(f"Selected {len(image_ids)} images from annotation file")
+            log_info(f"Selected {len(image_ids)} images from annotation file")
             
             images = []
             for img_id in tqdm(image_ids, desc="Loading images"):
@@ -149,27 +158,27 @@ class ModelEvaluator:
                 img_path = COCO_VAL_DIR / filename
                 
                 if not img_path.exists():
-                    print(f"Warning: Image file not found: {img_path}")
+                    log_warning(f"Warning: Image file not found: {img_path}")
                     continue
                 
                 # Load image
                 img = cv2.imread(str(img_path))
                 if img is None:
-                    print(f"Warning: Could not load image {img_path}")
+                    log_warning(f"Warning: Could not load image {img_path}")
                     continue
                     
                 images.append((img, img_id))
         else:
             # Fallback to directory search if COCO API not available
-            print("Falling back to directory search for images")
+            log_info("Falling back to directory search for images")
             image_files = list(COCO_VAL_DIR.glob("*.jpg"))
             if not image_files:
-                print(f"Error: No images found in {COCO_VAL_DIR}")
+                log_error(f"Error: No images found in {COCO_VAL_DIR}")
                 return []
             
             # Limit number of images (useful for quick testing)
             image_files = image_files[:max_images]
-            print(f"Loading {len(image_files)} images from directory")
+            log_info(f"Loading {len(image_files)} images from directory")
             
             images = []
             for img_file in tqdm(image_files, desc="Loading images"):
@@ -179,12 +188,12 @@ class ModelEvaluator:
                 # Load image
                 img = cv2.imread(str(img_file))
                 if img is None:
-                    print(f"Warning: Could not load image {img_file}")
+                    log_warning(f"Warning: Could not load image {img_file}")
                     continue
                     
                 images.append((img, img_id))
         
-        print(f"Loaded {len(images)} images")
+        log_info(f"Loaded {len(images)} images")
         return images
     
     def evaluate_model(self, model_config, images, save_visualizations=True, progress_callback=None):
@@ -209,7 +218,7 @@ class ModelEvaluator:
         conf_threshold = model_config.get("conf_threshold", 0.25)
         iou_threshold = model_config.get("iou_threshold", 0.45)
         
-        print(f"\nEvaluating {model_type.upper()} model with conf_threshold={conf_threshold}, iou_threshold={iou_threshold}...")
+        log_info(f"\nEvaluating {model_type.upper()} model with conf_threshold={conf_threshold}, iou_threshold={iou_threshold}...")
         
         # Initialize the model with proper thresholds
         try:
@@ -217,10 +226,10 @@ class ModelEvaluator:
                                          conf_threshold=conf_threshold, 
                                          iou_threshold=iou_threshold)
             if model_manager.model_wrapper is None:
-                print(f"Error: Failed to initialize {model_type} model")
+                log_error(f"Error: Failed to initialize {model_type} model")
                 return None
         except Exception as e:
-            print(f"Error initializing {model_type} model: {e}")
+            log_exception(e, context=f"Error initializing {model_type} model")
             return None
         
         # Initialize metrics
@@ -262,7 +271,7 @@ class ModelEvaluator:
                 try:
                     progress_callback(model_type, idx + 1, len(images))
                 except Exception as cb_err:
-                    print(f"Warning: Progress callback failed: {cb_err}") # Avoid crashing evaluation due to callback error
+                    log_warning(f"Warning: Progress callback failed: {cb_err}") # Avoid crashing evaluation due to callback error
 
             try:
                 # Run inference with timing
@@ -302,10 +311,10 @@ class ModelEvaluator:
 
                     # Debug large sample of detections to understand class IDs
                     if idx < 3 and det_idx < 5:
-                        print(f"DEBUG: {model_type} detection {det_idx} - class_id={class_id}, class_name={det.get('class_name', 'unknown')}, score={det.get('score', 0)}")
+                        log_info(f"DEBUG: {model_type} detection {det_idx} - class_id={class_id}, class_name={det.get('class_name', 'unknown')}, score={det.get('score', 0)}")
                     
                     # Skip if class_id is None or not recognized
-                    if class_id is None:
+                    if (class_id is None):
                         continue
                     
                     # Get bounding box coordinates
@@ -344,7 +353,7 @@ class ModelEvaluator:
                             try:
                                 # Debug for sample masks
                                 if idx < 2 and i < 2:
-                                    print(f"DEBUG: {model_type} segm {i} - mask shape={mask.shape}, class_id={class_id}, class_name={det.get('class_name', 'unknown')}")
+                                    log_info(f"DEBUG: {model_type} segm {i} - mask shape={mask.shape}, class_id={class_id}, class_name={det.get('class_name', 'unknown')}")
                                 
                                 # Ensure mask is binary (0/1)
                                 binary_mask = (mask > 0).astype(np.uint8)
@@ -355,7 +364,7 @@ class ModelEvaluator:
                                 # Debug mask size vs image size
                                 if idx < 2 and i < 2:
                                     img_h, img_w = image.shape[:2]
-                                    print(f"DEBUG: Image size: {img_w}x{img_h}, Mask size: {mask_w}x{mask_h}")
+                                    log_info(f"DEBUG: Image size: {img_w}x{img_h}, Mask size: {mask_w}x{mask_h}")
                                 
                                 # Resize mask if needed to match image dimensions
                                 img_h, img_w = image.shape[:2]
@@ -363,7 +372,7 @@ class ModelEvaluator:
                                     binary_mask = cv2.resize(binary_mask, (img_w, img_h), 
                                                            interpolation=cv2.INTER_NEAREST)
                                     if idx < 2 and i < 2:
-                                        print(f"DEBUG: Resized mask to match image: {img_w}x{img_h}")
+                                        log_info(f"DEBUG: Resized mask to match image: {img_w}x{img_h}")
                                 
                                 # Calculate area 
                                 area = float(np.sum(binary_mask))
@@ -406,11 +415,11 @@ class ModelEvaluator:
                                 metrics["shape_metrics"]["by_size"][size_category]["circularity"].append(shape_metrics["circularity"])
                                 
                             except Exception as mask_err:
-                                print(f"Error converting segmentation mask: {mask_err}")
+                                log_exception(mask_err, context="Error converting segmentation mask")
                                 continue
 
             except Exception as e:
-                print(f"Error processing image {image_id} with {model_type}: {e}")
+                log_exception(e, context=f"Error processing image {image_id} with {model_type}")
                 metrics["failures"] += 1
         
         # Calculate standard statistics
@@ -432,22 +441,22 @@ class ModelEvaluator:
                 # Before evaluation, check validation format
                 if coco_bbox_predictions:
                     # Verify a sample of predictions
-                    print(f"\nDEBUG: First 3 bbox predictions from {len(coco_bbox_predictions)} total:")
+                    log_info(f"\nDEBUG: First 3 bbox predictions from {len(coco_bbox_predictions)} total:")
                     for i, pred in enumerate(coco_bbox_predictions[:3]):
-                        print(f"  {i}: image_id={pred['image_id']}, category_id={pred['category_id']}, score={pred['score']:.3f}")
+                        log_info(f"  {i}: image_id={pred['image_id']}, category_id={pred['category_id']}, score={pred['score']:.3f}")
                     
                     # Get ground truth categories for comparison
                     gt_cats = self.coco_gt_api.loadCats(self.coco_gt_api.getCatIds())
-                    print(f"\nDEBUG: First 5 ground truth categories:")
+                    log_info(f"\nDEBUG: First 5 ground truth categories:")
                     for i, cat in enumerate(gt_cats[:5]):
-                        print(f"  {i}: id={cat['id']}, name={cat['name']}")
+                        log_info(f"  {i}: id={cat['id']}, name={cat['name']}")
                     
                     # Validate category IDs against ground truth
                     valid_cat_ids = set(cat['id'] for cat in gt_cats)
                     unknown_cat_ids = set(pred['category_id'] for pred in coco_bbox_predictions) - valid_cat_ids
                     
                     if unknown_cat_ids:
-                        print(f"\nWARNING: Found {len(unknown_cat_ids)} category IDs not in ground truth: {sorted(unknown_cat_ids)[:5]}...")
+                        log_warning(f"\nWARNING: Found {len(unknown_cat_ids)} category IDs not in ground truth: {sorted(unknown_cat_ids)[:5]}...")
                         # Fix category IDs if needed - map to valid IDs or remove invalid ones
                         valid_predictions = []
                         for pred in coco_bbox_predictions:
@@ -455,12 +464,12 @@ class ModelEvaluator:
                                 valid_predictions.append(pred)
                         
                         if len(valid_predictions) < len(coco_bbox_predictions):
-                            print(f"WARNING: Removed {len(coco_bbox_predictions) - len(valid_predictions)} predictions with invalid category IDs")
+                            log_warning(f"WARNING: Removed {len(coco_bbox_predictions) - len(valid_predictions)} predictions with invalid category IDs")
                             coco_bbox_predictions = valid_predictions
                 
                 # Evaluate bounding box predictions
                 if coco_bbox_predictions:
-                    print(f"Running COCO bbox evaluation for {model_type} with {len(coco_bbox_predictions)} predictions")
+                    log_info(f"Running COCO bbox evaluation for {model_type} with {len(coco_bbox_predictions)} predictions")
                     
                     # Save predictions to a temporary file
                     with tempfile.NamedTemporaryFile('w', suffix='.json', delete=False) as f:
@@ -471,8 +480,8 @@ class ModelEvaluator:
                     try:
                         coco_dt = self.coco_gt_api.loadRes(dt_bbox_file)
                     except Exception as e:
-                        print(f"\nERROR loading detection results: {e}")
-                        print("Attempting to fix format issues...")
+                        log_error(f"\nERROR loading detection results: {e}")
+                        log_info("Attempting to fix format issues...")
                         
                         # Try to fix potentially problematic predictions
                         fixed_predictions = []
@@ -487,7 +496,7 @@ class ModelEvaluator:
                                 }
                                 fixed_predictions.append(fixed_pred)
                             except Exception as fix_err:
-                                print(f"Skipping invalid prediction: {fix_err}")
+                                log_warning(f"Skipping invalid prediction: {fix_err}")
                                 continue
                         
                         # Save fixed predictions
@@ -524,13 +533,29 @@ class ModelEvaluator:
                         "AR_medium": float(coco_bbox_eval.stats[10]),        # AR for medium objects
                         "AR_large": float(coco_bbox_eval.stats[11])          # AR for large objects
                     }
+
+                    # Extract and store PR curve data for bounding boxes
+                    # eval['precision'] is (T x R x K x A x M)
+                    # T: IoU thresholds, R: Recall thresholds, K: Categories, A: Area ranges, M: Max detections
+                    if coco_bbox_eval.eval['precision'].size > 0:
+                        # Precision for the first IoU threshold (e.g., 0.5), all recall thresholds, 
+                        # averaged over all categories, for 'all' area (index 0), and maxDets=100 (last index for M)
+                        precision_values = coco_bbox_eval.eval['precision'][0, :, :, 0, -1] 
+                        mean_precision = np.mean(precision_values, axis=1) # Average over categories (K dimension)
+                        recall_values = coco_bbox_eval.params.recThrs
+                        
+                        metrics["coco_metrics"]["pr_curve_precision"] = mean_precision.tolist()
+                        metrics["coco_metrics"]["pr_curve_recall"] = recall_values.tolist()
+                    else:
+                        metrics["coco_metrics"]["pr_curve_precision"] = []
+                        metrics["coco_metrics"]["pr_curve_recall"] = []
                     
                     # Clean up the temporary file
                     os.unlink(dt_bbox_file)
                 
                 # Evaluate segmentation predictions for models with segmentation capability
                 if coco_segm_predictions and is_seg_model:
-                    print(f"Running COCO segmentation evaluation for {model_type} with {len(coco_segm_predictions)} predictions")
+                    log_info(f"Running COCO segmentation evaluation for {model_type} with {len(coco_segm_predictions)} predictions")
                     
                     # Save predictions to a temporary file
                     with tempfile.NamedTemporaryFile('w', suffix='.json', delete=False) as f:
@@ -541,8 +566,8 @@ class ModelEvaluator:
                     try:
                         coco_dt = self.coco_gt_api.loadRes(dt_segm_file)
                     except Exception as e:
-                        print(f"\nERROR loading segmentation results: {e}")
-                        print("Attempting to fix format issues...")
+                        log_error(f"\nERROR loading segmentation results: {e}")
+                        log_info("Attempting to fix format issues...")
                         
                         # Try to fix potentially problematic predictions
                         fixed_predictions = []
@@ -558,7 +583,7 @@ class ModelEvaluator:
                                 }
                                 fixed_predictions.append(fixed_pred)
                             except Exception as fix_err:
-                                print(f"Skipping invalid segmentation prediction: {fix_err}")
+                                log_warning(f"Skipping invalid segmentation prediction: {fix_err}")
                                 continue
                         
                         # Save fixed predictions
@@ -600,7 +625,7 @@ class ModelEvaluator:
                     os.unlink(dt_segm_file)
                 # Even if we don't have segmentation predictions, include basic metric structure for consistency
                 elif is_seg_model and not coco_segm_predictions:
-                    print(f"No valid segmentation predictions for {model_type}")
+                    log_info(f"No valid segmentation predictions for {model_type}")
                     # Add empty segmentation metrics to maintain consistent structure
                     metrics["coco_segm_metrics"] = {
                         "Segm_AP_IoU=0.50:0.95": 0.0,
@@ -611,7 +636,7 @@ class ModelEvaluator:
                         "Segm_AP_large": 0.0
                     }
             except Exception as e:
-                print(f"Error during COCO evaluation for {model_type}: {e}")
+                log_exception(e, context=f"Error during COCO evaluation for {model_type}")
                 import traceback
                 traceback.print_exc()
                 
@@ -620,33 +645,33 @@ class ModelEvaluator:
                     metrics["coco_segm_metrics"] = {"error": str(e)}
         
         # Print summary
-        print(f"\n{model_type.upper()} Evaluation Summary:")
-        print(f"- Successfully processed: {metrics['successful_inferences']}/{metrics['total_images']} images")
-        print(f"- Average FPS: {metrics['fps']:.2f}")
-        print(f"- Total detections: {metrics['total_detections']}")
-        print(f"- Unique classes detected: {metrics['unique_classes_detected']}")
-        print(f"- Average detections per image: {metrics['avg_detections_per_image']:.2f}")
+        log_info(f"\n{model_type.upper()} Evaluation Summary:")
+        log_info(f"- Successfully processed: {metrics['successful_inferences']}/{metrics['total_images']} images")
+        log_info(f"- Average FPS: {metrics['fps']:.2f}")
+        log_info(f"- Total detections: {metrics['total_detections']}")
+        log_info(f"- Unique classes detected: {metrics['unique_classes_detected']}")
+        log_info(f"- Average detections per image: {metrics['avg_detections_per_image']:.2f}")
         
         # Print COCO metrics if available
         if "coco_metrics" in metrics and metrics["coco_metrics"] and "error" not in metrics["coco_metrics"]:
-            print("- COCO Detection Metrics:")
-            print(f"  • mAP (IoU=0.50:0.95): {metrics['coco_metrics']['AP_IoU=0.50:0.95']:.4f}")
-            print(f"  • AP (IoU=0.50): {metrics['coco_metrics']['AP_IoU=0.50']:.4f}")
-            print(f"  • AP (IoU=0.75): {metrics['coco_metrics']['AP_IoU=0.75']:.4f}")
+            log_info("- COCO Detection Metrics:")
+            log_info(f"  • mAP (IoU=0.50:0.95): {metrics['coco_metrics']['AP_IoU=0.50:0.95']:.4f}")
+            log_info(f"  • AP (IoU=0.50): {metrics['coco_metrics']['AP_IoU=0.50']:.4f}")
+            log_info(f"  • AP (IoU=0.75): {metrics['coco_metrics']['AP_IoU=0.75']:.4f}")
         
         # Print segmentation metrics if available
         if "coco_segm_metrics" in metrics and metrics["coco_segm_metrics"] and "error" not in metrics["coco_segm_metrics"]:
-            print("- COCO Segmentation Metrics:")
-            print(f"  • Segmentation mAP (IoU=0.50:0.95): {metrics['coco_segm_metrics']['Segm_AP_IoU=0.50:0.95']:.4f}")
-            print(f"  • Segmentation AP (IoU=0.50): {metrics['coco_segm_metrics']['Segm_AP_IoU=0.50']:.4f}")
-            print(f"  • Segmentation AP (IoU=0.75): {metrics['coco_segm_metrics']['Segm_AP_IoU=0.75']:.4f}")
+            log_info("- COCO Segmentation Metrics:")
+            log_info(f"  • Segmentation mAP (IoU=0.50:0.95): {metrics['coco_segm_metrics']['Segm_AP_IoU=0.50:0.95']:.4f}")
+            log_info(f"  • Segmentation AP (IoU=0.50): {metrics['coco_segm_metrics']['Segm_AP_IoU=0.50']:.4f}")
+            log_info(f"  • Segmentation AP (IoU=0.75): {metrics['coco_segm_metrics']['Segm_AP_IoU=0.75']:.4f}")
         
         # If shape metrics were collected, include summary stats
         if metrics["shape_metrics"]["compactness"]:
-            print("- Shape Metrics (Segmentation Quality):")
-            print(f"  • Compactness: {np.mean(metrics['shape_metrics']['compactness']):.4f}")
-            print(f"  • Convexity: {np.mean(metrics['shape_metrics']['convexity']):.4f}")
-            print(f"  • Circularity: {np.mean(metrics['shape_metrics']['circularity']):.4f}")
+            log_info("- Shape Metrics (Segmentation Quality):")
+            log_info(f"  • Compactness: {np.mean(metrics['shape_metrics']['compactness']):.4f}")
+            log_info(f"  • Convexity: {np.mean(metrics['shape_metrics']['convexity']):.4f}")
+            log_info(f"  • Circularity: {np.mean(metrics['shape_metrics']['circularity']):.4f}")
 
         return metrics
     
@@ -661,12 +686,12 @@ class ModelEvaluator:
         Returns:
             dict: Reliability metrics for each model
         """
-        print(f"\nRunning reliability test with {num_runs} evaluation runs")
+        log_info(f"\nRunning reliability test with {num_runs} evaluation runs")
         
         # Load validation images
         images = self.load_coco_val_images(max_images)
         if not images:
-            print("Error: No images to evaluate")
+            log_error("Error: No images to evaluate")
             return {}
         
         # Run multiple evaluations for each model
@@ -674,17 +699,17 @@ class ModelEvaluator:
         
         for model_config in self.models_list:
             model_type = model_config["type"]
-            print(f"\nTesting reliability of {model_type} model...")
+            log_info(f"\nTesting reliability of {model_type} model...")
             
             run_metrics = []
             for run in range(num_runs):
-                print(f"Run {run+1}/{num_runs}:")
+                log_info(f"Run {run+1}/{num_runs}:")
                 metrics = self.evaluate_model(model_config, images, save_visualizations=(run==0))
                 if metrics:
                     run_metrics.append(metrics)
             
             if not run_metrics:
-                print(f"No successful evaluation runs for {model_type}")
+                log_warning(f"No successful evaluation runs for {model_type}")
                 continue
             
             # Calculate reliability metrics
@@ -701,10 +726,10 @@ class ModelEvaluator:
                 "run_metrics": run_metrics
             }
             
-            print(f"{model_type} Reliability Results:")
-            print(f"- Mean FPS: {reliability_results[model_type]['fps_mean']:.2f} ± {reliability_results[model_type]['fps_std']:.2f}")
-            print(f"- FPS Coefficient of Variation: {reliability_results[model_type]['fps_coef_var']:.3f}")
-            print(f"- Mean Detections: {reliability_results[model_type]['detection_mean']:.1f} ± {reliability_results[model_type]['detection_std']:.1f}")
+            log_info(f"{model_type} Reliability Results:")
+            log_info(f"- Mean FPS: {reliability_results[model_type]['fps_mean']:.2f} ± {reliability_results[model_type]['fps_std']:.2f}")
+            log_info(f"- FPS Coefficient of Variation: {reliability_results[model_type]['fps_coef_var']:.3f}")
+            log_info(f"- Mean Detections: {reliability_results[model_type]['detection_mean']:.1f} ± {reliability_results[model_type]['detection_std']:.1f}")
         
         # Save reliability results
         if reliability_results:
@@ -723,7 +748,7 @@ class ModelEvaluator:
             with open(reliability_file, 'w') as f:
                 json.dump(serializable_results, f, indent=2)
             
-            print(f"Reliability results saved to {reliability_file}")
+            log_info(f"Reliability results saved to {reliability_file}")
         
         return reliability_results
     
@@ -736,13 +761,13 @@ class ModelEvaluator:
             save_visualizations (bool): Whether to save visualized detections
             progress_callback (callable, optional): Function to report progress during model evaluation.
         """
-        print(f"\nEvaluating models using {max_images} images from COCO val2017 dataset")
-        print(f"This represents {(max_images/COCO_VAL_TOTAL_IMAGES)*100:.1f}% of the full validation set")
+        log_info(f"\nEvaluating models using {max_images} images from COCO val2017 dataset")
+        log_info(f"This represents {(max_images/COCO_VAL_TOTAL_IMAGES)*100:.1f}% of the full validation set")
         
         # Load validation images
         images = self.load_coco_val_images(max_images)
         if not images:
-            print("Error: No images to evaluate")
+            log_error("Error: No images to evaluate")
             return
         
         # Evaluate each model
@@ -777,7 +802,7 @@ class ModelEvaluator:
         with open(results_file, 'w') as f:
             json.dump(serializable_results, f, indent=2)
         
-        print(f"Results saved to {results_file}")
+        log_info(f"Results saved to {results_file}")
 
     def calculate_shape_metrics(self, binary_mask):
         """
@@ -941,7 +966,7 @@ def main():
     # Validate args
     max_images = min(max(1, args.images), COCO_VAL_TOTAL_IMAGES)
     if max_images != args.images:
-        print(f"Adjusted number of images to {max_images} (valid range: 1-{COCO_VAL_TOTAL_IMAGES})")
+        log_info(f"Adjusted number of images to {max_images} (valid range: 1-{COCO_VAL_TOTAL_IMAGES})")
 
     save_individual_visualizations = not args.no_vis # Renamed for clarity
 
@@ -955,7 +980,7 @@ def main():
     if args.models:
         # User specified models
         user_selected_model_types = args.models
-        print(f"Evaluating user-specified models: {', '.join(user_selected_model_types)}")
+        log_info(f"Evaluating user-specified models: {', '.join(user_selected_model_types)}")
         
         # Filter the full list of available model configs based on user selection
         selected_models_for_evaluation = [m_config for m_config in all_available_model_configs if m_config["type"] in user_selected_model_types]
@@ -964,10 +989,10 @@ def main():
         found_model_types = [m_config["type"] for m_config in selected_models_for_evaluation]
         for sm_type in user_selected_model_types:
             if (sm_type not in found_model_types):
-                print(f"Warning: Specified model type '{sm_type}' not found in available model configurations. It will be skipped.")
+                log_warning(f"Warning: Specified model type '{sm_type}' not found in available model configurations. It will be skipped.")
     else:
         # No models specified by user, use default SoA models
-        print(f"No models specified via --models argument. Evaluating default SoA models: {', '.join(DEFAULT_SOA_MODELS)}")
+        log_info(f"No models specified via --models argument. Evaluating default SoA models: {', '.join(DEFAULT_SOA_MODELS)}")
         selected_models_for_evaluation = [m_config for m_config in all_available_model_configs if m_config["type"] in DEFAULT_SOA_MODELS]
         
         # Verify that default models were found
@@ -975,28 +1000,28 @@ def main():
             found_default_types = [m_config["type"] for m_config in selected_models_for_evaluation]
             missing_defaults = [m_type for m_type in DEFAULT_SOA_MODELS if m_type not in found_default_types]
             if missing_defaults:
-                print(f"Warning: The following default SoA models were not found in available model configurations and will be skipped: {', '.join(missing_defaults)}")
+                log_warning(f"Warning: The following default SoA models were not found in available model configurations and will be skipped: {', '.join(missing_defaults)}")
         
         if not selected_models_for_evaluation: # If even after trying defaults, none are available
-             print(f"Error: None of the default SoA models ({', '.join(DEFAULT_SOA_MODELS)}) are available in the current model configurations.")
+             log_error(f"Error: None of the default SoA models ({', '.join(DEFAULT_SOA_MODELS)}) are available in the current model configurations.")
              available_model_names_from_configs = [m_config["type"] for m_config in all_available_model_configs]
-             print(f"Available models are: {', '.join(available_model_names_from_configs) if available_model_names_from_configs else 'None'}")
+             log_info(f"Available models are: {', '.join(available_model_names_from_configs) if available_model_names_from_configs else 'None'}")
              sys.exit(1)
 
     if not selected_models_for_evaluation:
-        print("Error: No models selected or available for evaluation. Exiting.")
+        log_error("Error: No models selected or available for evaluation. Exiting.")
         available_model_names_from_configs = [m_config["type"] for m_config in all_available_model_configs]
-        print(f"Available models are: {', '.join(available_model_names_from_configs) if available_model_names_from_configs else 'None'}")
+        log_info(f"Available models are: {', '.join(available_model_names_from_configs) if available_model_names_from_configs else 'None'}")
         sys.exit(1)
 
-    print(f"Final list of models to evaluate: {', '.join([m['type'] for m in selected_models_for_evaluation])}")
+    log_info(f"Final list of models to evaluate: {', '.join([m['type'] for m in selected_models_for_evaluation])}")
 
     # Add confidence and IoU thresholds to model configs
     for model_config in selected_models_for_evaluation:
         model_config["conf_threshold"] = args.conf_threshold
         model_config["iou_threshold"] = args.iou_threshold
 
-    print("Starting model evaluation...")
+    log_info("Starting model evaluation...")
 
     # Create evaluator with the determined list of models
     evaluator = ModelEvaluator(selected_models_for_evaluation)
@@ -1004,25 +1029,19 @@ def main():
     # Run evaluation
     evaluator.run_evaluation(max_images, save_individual_visualizations)
 
-    print("Evaluation complete!")    # Print a formatted summary table to the terminal
+    log_info("Evaluation complete!")    # Print a formatted summary table to the terminal
     try:
-        # Try to import our summary table module
-        try:
-            from print_model_summary import print_summary_table
-        except ImportError:
-            from src.print_model_summary import print_summary_table
-            
-        # Print the summary table
+        from print_model_summary import print_summary_table # Should now work
         print_summary_table()
     except ImportError as e:
-        print(f"Warning: Could not import summary table module: {e}")
+        log_warning(f"Warning: Could not import summary table module: {e}")
     except Exception as e:
-        print(f"Error printing summary table: {e}")
+        log_error(f"Error printing summary table: {e}")
         import traceback
         traceback.print_exc()
 
     # Always generate the metrics dashboard after evaluation
-    print("\nGenerating metrics dashboard...")
+    log_info("\nGenerating metrics dashboard...")
     try:
         # Try relative import first (when running as a module)
         try:
@@ -1037,16 +1056,15 @@ def main():
         dashboard_path = visualizer.create_metrics_dashboard(show_plot=False) # Set show_plot=False to only save
 
         if dashboard_path:
-            print(f"Metrics dashboard generated successfully at: {dashboard_path}")
+            log_info(f"Metrics dashboard generated successfully at: {dashboard_path}")
         else:
-            print("Failed to generate metrics dashboard.")
+            log_error("Failed to generate metrics dashboard.")
 
     except ImportError as e:
-        print(f"Warning: Could not import metrics visualizer: {e}")
-        print("Skipping dashboard generation...")
+        log_warning(f"Warning: Could not import metrics visualizer: {e}")
+        log_info("Skipping dashboard generation...")
     except Exception as e:
-        print(f"Error generating dashboard: {e}")
-        import traceback
+        log_error(f"Error generating dashboard: {e}")
         traceback.print_exc()
 
 if __name__ == "__main__":

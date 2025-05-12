@@ -3,12 +3,19 @@
 Generate metrics dashboard from existing evaluation results.
 This script lets you regenerate the dashboard visualization without running a new evaluation.
 """
-
-import argparse
 import os
+import argparse
+import sys # Add sys import
+import traceback # Add traceback import
 from pathlib import Path
-# Fix the import - import directly from metrics_visualizer in the same directory
-from metrics_visualizer import MetricsVisualizer, RESULTS_DIR
+
+# Add the project root to sys.path to allow imports from src
+current_dir = Path(__file__).resolve().parent
+project_root = current_dir.parent
+if str(project_root) not in sys.path:
+    sys.path.append(str(project_root))
+
+from src.metrics_visualizer import MetricsVisualizer, RESULTS_DIR
 
 def main():
     """Generate a metrics dashboard from existing results"""
@@ -43,11 +50,6 @@ def main():
         default=150,
         help="DPI (resolution) for the output image (default: 150)"
     )
-    parser.add_argument(
-        "--precision-recall",
-        action="store_true",
-        help="Also generate precision-recall curves"
-    )
     args = parser.parse_args()
 
     results_file = args.results if args.results else None
@@ -72,17 +74,9 @@ def main():
     )
     
     if dashboard_path:
-        print(f"Dashboard generated successfully at: {dashboard_path}")
+        print(f"Dashboard generated successfully: {dashboard_path}")
     else:
-        print("Failed to generate dashboard.")
-    
-    # Generate precision-recall curves if requested
-    if args.precision_recall:
-        pr_path = visualizer.plot_precision_recall_curves(show_plot=args.show)
-        if pr_path:
-            print(f"Precision-recall curves generated at: {pr_path}")
-        else:
-            print("Failed to generate precision-recall curves.")
+        print("Error generating dashboard")
 
 if __name__ == "__main__":
     main()

@@ -1,31 +1,27 @@
 # Core ML Framework
-torch
-torchvision
-torchaudio
+# The following PyTorch components (torch, torchvision, torchaudio) are required.
+# If you need specific CUDA-enabled versions (e.g., for CUDA 12.8 compatibility via cu128),
+# you might install torch and torchaudio using a command like:
+# pip install torch==2.7.0 torchaudio==2.7.0 --index-url https://download.pytorch.org/whl/cu128
+# Ensure the torchvision version is also compatible and consider sourcing it similarly if needed.
+torch==2.7.0
+torchvision==0.22.0
+torchaudio==2.7.0
+ultralytics==8.3.130
 
-# YOLO / Ultralytics / FastSAM
-ultralytics
+
 
 # OpenCV for image/video processing
-opencv-python
+opencv-python==4.11.0.86
 
 # DINO-Seg dependencies
-transformers
-timm
-huggingface_hub
-
-# Testing dependencies
-pytest
-pytest-cov
-pytest-mock
-
-# MMDetection dependencies (REMOVED)
-# Note: Specific versions might be required depending on your PyTorch/CUDA setup.
-# Refer to MMDetection installation guide if auto-install fails.
-# mmcv # Removed
-# mmdet # Removed
+transformers==4.51.3
+timm==1.0.15
+huggingface_hub==0.31.1
 
 # Other common dependencies
-numpy
-Pillow
-requests # Added for model downloading
+numpy==2.2.5
+Pillow==11.2.1
+requests==2.32.3
+ttkthemes==3.2.2
+pycocotools==2.0.6

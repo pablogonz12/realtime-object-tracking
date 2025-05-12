@@ -169,3 +169,97 @@ Options:
 - `--models`: Models to evaluate (default: top 3 by size)
 - `--demo-video`: Video to process with best model (optional)
 - `--output-dir`: Directory to save outputs (optional)
+
+# Usage Guide
+
+## Command-Line Interface (Recommended)
+
+This project provides several command-line tools for model evaluation, visualization, and video processing.
+
+### Evaluating Models
+
+```bash
+# Evaluate all supported models on COCO dataset
+python src/evaluate_models.py
+
+# Evaluate specific models
+python src/evaluate_models.py --models yolov8n-seg yolov8s-seg
+
+# Limit evaluation to fewer images for faster results
+python src/evaluate_models.py --images 100
+
+# Adjust batch size for memory constraints
+python src/evaluate_models.py --batch-size 4
+
+# Full options
+python src/evaluate_models.py --models yolov8n-seg yolov8s-seg --images 1000 --batch-size 8 --confidence 0.25 --iou 0.45 --device cuda
+```
+
+### Creating Demo Videos
+
+```bash
+# Create a demo video using the default model
+python src/create_demo_video.py --video path/to/your/video.mp4
+
+# Use the best model from evaluations
+python src/create_demo_video.py --best-model --video path/to/your/video.mp4
+
+# Specify model and output location
+python src/create_demo_video.py --model yolov8n-seg --video input.mp4 --output my_output_video.mp4
+
+# Adjust detection parameters
+python src/create_demo_video.py --model yolov8n-seg --video input.mp4 --conf-threshold 0.4 --iou-threshold 0.5
+```
+
+### Generating Visualizations
+
+```bash
+# Generate performance visualization dashboard for all evaluated models
+python src/generate_dashboard.py
+
+# Generate dashboard from a specific results file
+python src/generate_dashboard.py --results-file inference/results/evaluation_results_20230615.json
+
+# Compare specific models side by side
+python src/compare_models.py --models yolov8n-seg yolov8s-seg yolov9c-seg
+```
+
+### Viewing Model Summary
+
+```bash
+# Print a summary of all available models and their stats
+python src/print_model_summary.py
+
+# View summary for specific models
+python src/print_model_summary.py --models yolov8n-seg yolov8s-seg
+```
+
+## GUI Application (Alpha)
+
+The GUI application provides an interactive interface for exploring model performance and testing on images/videos.
+
+```bash
+# Launch the GUI application
+python src/app.py
+```
+
+**Note:** The GUI is currently in alpha state and not recommended for evaluation tasks. Use the command-line tools for reliable results.
+
+## Generating the Metrics Dashboard
+
+To generate the model performance metrics dashboard from the command line:
+
+1.  Ensure you have run model evaluations using the "Evaluate Models" feature in the GUI or by running `src/evaluate_models.py` script. This will generate the necessary `evaluation_results_*.json` files in the `inference/results/` directory.
+2.  Navigate to the project's root directory in your terminal.
+3.  Run the following command:
+
+    ```bash
+    python src/generate_dashboard.py
+    ```
+
+This script will:
+-   Automatically find the latest `evaluation_results_*.json` file.
+-   Process the data for all models found in that file.
+-   Generate a comprehensive dashboard image (e.g., `metrics_dashboard_YYYYMMDD_HHMMSS.png`).
+-   Save the dashboard to the `inference/results/visualizations/` directory.
+-   By default, it will also attempt to display the generated dashboard image.

@@ -4,6 +4,10 @@
 ![License](https://img.shields.io/badge/license-MIT-orange.svg)
 ![Status](https://img.shields.io/badge/status-development-yellow.svg)
 
+**This project fulfills the requirements for Task 2: Recognizing Objects in Video Sequences.**
+The core objective is to develop a computer vision system that processes video input to detect, segment, and identify objects, displaying their position, shape, and name. This involves evaluating three state-of-the-art (SoA) approaches on a representative dataset and presenting the best performing system.
+**For a detailed solution, methodology, evaluation, and steps to reproduce the results for this task, please see: [Task #2 Solution and Deliverables](docs/task2_solution.md)**
+
 This project implements a robust computer vision system designed for detecting and segmenting objects within both video sequences and static images. It evaluates various state-of-the-art object detection and segmentation algorithms using the COCO dataset, focusing on performance metrics related to validity, reliability, and objectivity.
 
 ## Getting Started
@@ -20,6 +24,16 @@ To get started with this project, please refer to the following documentation:
 -   **Detailed Documentation**: For an in-depth understanding of the project, including specific solutions, project structure, and more, please explore the `docs/` folder.
 -   **Analysis & Visualization**: Evaluation results (JSON), performance dashboards (PNG), detailed metrics reports (PDF), and image visualizations from model evaluations are stored in the `inference/results/` directory (visualizations are typically in subdirectories like `inference/results/[model_name]_visualizations/`). Processed demo videos can be found in `inference/output_videos/`.
 -   **Requirements**: Project dependencies are listed in `requirements.txt`.
+
+## Generating the Metrics Dashboard
+
+To generate the performance metrics dashboard, navigate to the project's root directory in your terminal and run the following command:
+
+```bash
+python src/generate_dashboard.py
+```
+
+This script will process the latest evaluation results found in `inference/results/` and save the generated dashboard image to `inference/results/visualizations/`.
 
 ## Documentation Index
 

@@ -27,25 +27,34 @@ from data_sets.dataset_manager import DatasetManager
 from src.evaluate_models import ModelEvaluator, COCO_VAL_TOTAL_IMAGES
 from src.metrics_visualizer import MetricsVisualizer  # Import MetricsVisualizer
 import pandas as pd # Import pandas for displaying results table
+import json # Added import for json
+try:
+    from src.pipeline import determine_best_model, find_latest_results
+except ImportError:
+    print("Warning: Could not import pipeline functions for determining best model.")
+    determine_best_model = None
+    find_latest_results = None
+
+try:
+    from src.create_demo_video import create_demo_video, OUTPUT_DIR as DEMO_OUTPUT_DIR, VIDEO_DIR as DEMO_VIDEO_DIR
+except ImportError:
+    print("Warning: Could not import create_demo_video function or paths.")
+    create_demo_video = None
+    DEMO_OUTPUT_DIR = None # Define to avoid NameError if import fails
+    DEMO_VIDEO_DIR = None
+
 
 # Import model wrappers directly from consolidated models file
 from src.models import ModelManager # Removed unused YOLOWrapper, RTDETRWrapper, SAMWrapper imports
+try:
+    from models import DEFAULT_MODEL_PATHS as DEFAULT_MODELS # Use alias for compatibility
+except ImportError:
+    # Fallback or error handling if DEFAULT_MODEL_PATHS is also not found
+    print("Error: Could not import DEFAULT_MODEL_PATHS from models.py")
+    DEFAULT_MODELS = {} # Define as empty dict or handle as appropriate
 
-# Default model paths for auto-download
-DEFAULT_MODELS = {
-    'yolov8n-seg': 'models/pts/yolov8n-seg.pt',
-    'yolov8s-seg': 'models/pts/yolov8s-seg.pt',
-    'yolov8m-seg': 'models/pts/yolov8m-seg.pt',
-    'yolov8l-seg': 'models/pts/yolov8l-seg.pt',
-    'yolov8x-seg': 'models/pts/yolov8x-seg.pt',
-    'yolo11n-seg': 'models/pts/yolo11n-seg.pt',
-    'yolo11s-seg': 'models/pts/yolo11s-seg.pt',
-    'yolo11m-seg': 'models/pts/yolo11m-seg.pt',
-    'yolo11l-seg': 'models/pts/yolo11l-seg.pt',
-    'yolo11x-seg': 'models/pts/yolo11x-seg.pt',
-    'yolov9c-seg': 'models/pts/yolov9c-seg.pt',
-    'yolov9e-seg': 'models/pts/yolov9e-seg.pt'
-}
+from src.create_demo_video import find_best_model_from_evaluation, OUTPUT_DIR, VIDEO_DIR
+import subprocess  # Added for subprocess-related functionality
 
 def display_video_with_model(video_path, model_manager):
     """
@@ -149,6 +158,10 @@ def terminal_gui():
     return None, None
     # ... (original curses code removed for brevity) ...
 
+# Define RESULTS_DIR for finding evaluation results
+PROJECT_ROOT_PATH = Path(__file__).resolve().parent.parent
+RESULTS_DIR = PROJECT_ROOT_PATH / "inference" / "results"
+
 class GraphicalGUI:
     """
     Tkinter-based graphical user interface for the Computer Vision application.
@@ -172,6 +185,30 @@ class GraphicalGUI:
         self.custom_model_path = tk.StringVar()
         self.show_advanced_var = tk.BooleanVar(value=False)
         # self.preview_img = None # Removed, canvas handles images
+
+        # --- Best Model Determination ---
+        self.best_model_actual_name = None
+        self.best_model_display_name = None
+        if find_latest_results and determine_best_model and RESULTS_DIR:
+            try:
+                latest_results_file = find_latest_results() # find_latest_results uses RESULTS_DIR internally if it's defined in its scope
+                                                            # or we ensure RESULTS_DIR is accessible.
+                                                            # For safety, let's assume find_latest_results can find RESULTS_DIR.
+                if latest_results_file and latest_results_file.exists():
+                    with open(latest_results_file, 'r') as f:
+                        results_data = json.load(f)
+                    model_name, _ = determine_best_model(results_data)
+                    if model_name:
+                        self.best_model_actual_name = model_name
+                        self.best_model_display_name = f"(Auto-Best) {model_name}"
+                        print(f"Determined best model for UI: {self.best_model_actual_name}")
+            except Exception as e:
+                print(f"Could not determine best model for UI: {e}")
+                # Log this better in a real scenario
+                print(f"Could not determine best model for UI: {e}")
+
+        self.best_model_name = None
+        self._find_best_model()
 
         # --- State Variables ---
         self.video_thread = None  # Will hold the thread for video processing
@@ -207,7 +244,7 @@ class GraphicalGUI:
 
         # Initialize data - now model_requirements is defined before this is called
         self.available_samples = self.get_sample_videos()
-        self._update_model_info()
+        # self._update_model_info() # Call this after model dropdown is populated
 
         # Check for GPU availability at startup
         self.check_gpu_availability()
@@ -218,6 +255,14 @@ class GraphicalGUI:
         # Setup the UI and menu
         self._setup_ui()
         self._init_menu()
+
+    def _find_best_model(self):
+        """Find the best model from evaluation results and store it."""
+        try:
+            self.best_model_name = find_best_model_from_evaluation()
+        except Exception as e:
+            print(f"Error finding best model for UI: {e}")
+            self.best_model_name = None
 
     def _setup_ui(self):
         """Set up the main UI layout and components."""
@@ -249,8 +294,11 @@ class GraphicalGUI:
 
         ttk.Label(model_group, text="Type:").grid(row=0, column=0, sticky="w", padx=(0, 5))
         # Store reference to the dropdown
+        model_options = list(DEFAULT_MODELS.keys())
+        if self.best_model_name:
+            model_options.insert(0, f"(Auto-Best) {self.best_model_name}")
         self.model_type_dropdown = ttk.Combobox(model_group, textvariable=self.model_type_var,
-                                                values=list(DEFAULT_MODELS.keys()), state="readonly", width=15)
+                                                values=model_options, state="readonly", width=15)
         self.model_type_dropdown.grid(row=0, column=1, sticky="ew", padx=(0, 5))
         self.model_type_dropdown.bind("<<ComboboxSelected>>", self._on_model_type_change)
 
@@ -269,6 +317,28 @@ class GraphicalGUI:
         model_info_label = ttk.Label(model_group, textvariable=self.model_info_var, wraplength=350,
                                      anchor="nw", justify=tk.LEFT, padding=(0, 5, 0, 0))
         model_info_label.grid(row=2, column=0, columnspan=3, sticky="ew", pady=(10, 0))
+
+    def _get_selected_model_for_processing(self):
+        """Get the selected model for processing, handling the Auto-Best option."""
+        selected_model = self.model_type_var.get()
+        if selected_model.startswith("(Auto-Best)"):
+            return self.best_model_name
+        return selected_model
+
+    def _get_selected_video_path(self):
+        """Get the selected video path from the UI, always as a Path object."""
+        if self.file_notebook.index(self.file_notebook.select()) == 0:  # Sample Videos tab
+            selected_index = self.sample_listbox.curselection()
+            if not selected_index:
+                return None
+            # Convert string path to Path object
+            return Path(self.available_samples[selected_index[0]][0])
+        elif self.file_notebook.index(self.file_notebook.select()) == 1:  # File Explorer tab
+            selected_index = self.file_listbox.curselection()
+            if not selected_index:
+                return None
+            return Path(self.current_dir_var.get()) / self.file_listbox.get(selected_index[0])
+        return None
 
     def _setup_input_section(self, parent):
         """Setup the video input selection widgets using a Notebook."""
@@ -493,16 +563,11 @@ class GraphicalGUI:
         eval_menu.add_command(label="Run Evaluation...", command=self.run_evaluation_gui)
         menubar.add_cascade(label="Evaluate", menu=eval_menu)
 
-        # Metrics Visualization menu
+        # Metrics Visualization menu - simplified to only show dashboard
         metrics_menu = tk.Menu(menubar, tearoff=0)
         metrics_menu.add_command(label="Show Performance Dashboard", command=self.show_metrics_dashboard)
-        metrics_menu.add_command(label="Show Precision-Recall Curve", command=self.show_precision_recall_curve)
-        metrics_menu.add_command(label="Show Reliability Analysis", command=self.show_reliability_analysis)
-        metrics_menu.add_command(label="Show Performance Trends", command=self.show_performance_trends)
         metrics_menu.add_separator()
-        metrics_menu.add_command(label="Run Best Model on Test Video", command=self.run_best_model_on_test)
-        metrics_menu.add_separator()
-        metrics_menu.add_command(label="Generate Comprehensive Report", command=self.generate_metrics_report)
+        metrics_menu.add_command(label="Generate Demo from Selection", command=self.generate_demo_video_with_selection) # Changed label and command
         menubar.add_cascade(label="Metrics", menu=metrics_menu)
 
         # Attach to root
@@ -1102,53 +1167,18 @@ class GraphicalGUI:
                 
                 # Check if files exist
                 val_dir_exists = dm.coco_val_dir.exists() and any(dm.coco_val_dir.iterdir())
-                ann_dir_exists = dm.coco_ann_dir.exists() and any(dm.coco_ann_dir.iterdir())
-                
-                if not val_dir_exists and not ann_dir_exists:
-                    update_ui("No extracted dataset files found to compress.", 1.0)
-                    _show_completion("No files found to compress.")
-                    return
-                
-                compression_steps["check"]["done"] = True
-                total_progress = compression_steps["check"]["weight"]
-                update_ui("Found dataset files to compress.", total_progress)
-                
-                # Run compression process
-                if ann_dir_exists:
-                    update_ui("Compressing annotation files...", total_progress + 0.05)
-                    
-                    # Create dummy progress updates
-                    for i in range(1, 11):
-                        time.sleep(0.2)  # Simulate progress
-                        progress = total_progress + ((i/10) * compression_steps["annotations"]["weight"])
-                        update_ui(f"Compressing annotations: {i*10}%", progress)
-                    
-                    compression_steps["annotations"]["done"] = True
-                    total_progress += compression_steps["annotations"]["weight"]
-                
-                if val_dir_exists:
-                    update_ui("Compressing image files...", total_progress + 0.05)
-                    
-                    # Create dummy progress updates for images (takes longer)
-                    for i in range(1, 11):
-                        time.sleep(0.3)  # Simulate progress
-                        progress = total_progress + ((i/10) * compression_steps["images"]["weight"])
-                        update_ui(f"Compressing images: {i*10}%", progress)
-                    
-                    compression_steps["images"]["done"] = True
-                
-                # Actually run the compression
-                dm.compress_datasets()
-                
-                # Final update
-                update_ui("Compression completed successfully.", 1.0)
-                _show_completion("Datasets compressed successfully.")
-                
             except Exception as e:
-                error_message = f"Error during compression: {str(e)}"
-                update_ui(error_message, 0.0)
-                _show_error(error_message)
-        
+                print(f"Error in compress_thread: {e}")
+                # Consider calling update_ui here to inform the user of the error
+                # update_ui(f"Error during compression check: {e}", 0)
+            
+            # The misindented block previously here has been removed.
+            # Its functionality should be within update_ui or other parts of compress_thread's try block.
+
+            # Start the compression monitoring thread
+            thread = threading.Thread(target=compress_thread)
+            # ... existing code ...
+
         def update_ui(message, progress):
             # Update on the main thread
             self.root.after(0, lambda m=message, p=progress: _update_ui_internal(m, p))
@@ -1529,7 +1559,7 @@ class GraphicalGUI:
             try:
                 self.video_thread.join(timeout=1.0)
             except Exception as e:
-                print(f"Error stopping video thread: {e}")
+                print("Error stopping video thread: {e}")
 
         # Unbind any global keys we've set
         self.root.unbind("<space>")
@@ -2259,7 +2289,7 @@ class GraphicalGUI:
             metrics_vis = MetricsVisualizer()  # This will automatically load the latest results
 
             if not metrics_vis.results:
-                messagebox.showerror("Error", "No evaluation results found. Run an evaluation first.") # Corrected line
+                messagebox.showerror("Error", "No evaluation results found. Run an evaluation first.")
                 self.status_var.set("Ready")
                 return
 
@@ -2272,7 +2302,7 @@ class GraphicalGUI:
                 # Instead of showing the plot interactively, open the saved file with the system viewer
                 self.status_var.set(f"Metrics dashboard saved to {output_path}")
                 if messagebox.askyesno("Dashboard Generated", f"Dashboard saved to:\n{output_path}\n\nOpen image now?"):
-                    self.open_file(output_path)
+                    self.open_file(output_path) # This line was causing the error
             else:
                 self.status_var.set("Error generating metrics dashboard")
 
@@ -2280,440 +2310,98 @@ class GraphicalGUI:
             messagebox.showerror("Error", "Required packages for visualization are not installed.\n\n"
                                "Please install matplotlib, seaborn, and pandas.")
         except Exception as e:
-            import traceback
             traceback.print_exc()
             messagebox.showerror("Error", f"Failed to generate metrics dashboard:\n{str(e)}")
             self.status_var.set("Error generating metrics dashboard")
 
-    def show_precision_recall_curve(self):
-        """Show precision-recall curves in a new window"""
+    def open_file(self, file_path: str) -> None:
+        """
+        Opens a file with the default system application.
+
+        Args:
+            file_path (str): The path to the file to open.
+        """
         try:
-            from src.metrics_visualizer import MetricsVisualizer
-
-            self.status_var.set("Loading metrics data...")
-            metrics_vis = MetricsVisualizer()
-
-            if not metrics_vis.results:
-                messagebox.showerror("Error", "No evaluation results found. Run an evaluation first.")
-                self.status_var.set("Ready")
-                return
-
-            self.status_var.set("Generating precision-recall curves...")
-            output_path = metrics_vis.plot_precision_recall_curves(show_plot=True)
-
-            if output_path:
-                self.status_var.set(f"Precision-recall curves saved to {output_path}")
-            else:
-                self.status_var.set("Precision-recall curves displayed")
-
-        except ImportError:
-            messagebox.showerror("Error", "Required packages for visualization are not installed.\n\n"
-                               "Please install matplotlib, seaborn, and pandas.")
-
-    def show_reliability_analysis(self):
-        """Show reliability analysis visualization in a new window"""
-        try:
-            from src.metrics_visualizer import MetricsVisualizer
-
-            self.status_var.set("Loading metrics data...")
-            metrics_vis = MetricsVisualizer()
-
-            if not metrics_vis.results:
-                messagebox.showerror("Error", "No evaluation results found. Run an evaluation first.")
-                self.status_var.set("Ready")
-                return
-
-            self.status_var.set("Generating reliability analysis...")
-            output_path = metrics_vis.plot_reliability_analysis(show_plot=True)
-
-            if output_path:
-                self.status_var.set(f"Reliability analysis saved to {output_path}")
-            else:
-                self.status_var.set("Reliability analysis displayed")
-
-        except ImportError:
-            messagebox.showerror("Error", "Required packages for visualization are not installed.\n\n"
-                               "Please install matplotlib, seaborn, and pandas.")
-
-    def show_performance_trends(self):
-        """Show performance trends over time in a new window"""
-        try:
-            from src.metrics_visualizer import MetricsVisualizer
-
-            self.status_var.set("Loading metrics data...")
-            # For this one, we need multiple results files to show trends
-            metrics_vis = MetricsVisualizer()
-            aggregated_data = metrics_vis.load_multiple_results()
-
-            if not aggregated_data:
-                messagebox.showerror("Error", "Not enough evaluation results found to show trends.\n"
-                                   "Run multiple evaluations to track performance over time.")
-                self.status_var.set("Ready")
-                return
-
-            self.status_var.set("Generating performance trends...")
-            output_path = metrics_vis.plot_performance_trends(aggregated_data, show_plot=True)
-
-            if output_path:
-                self.status_var.set(f"Performance trends saved to {output_path}")
-            else:
-                self.status_var.set("Performance trends displayed")
-
-        except ImportError:
-            messagebox.showerror("Error", "Required packages for visualization are not installed.\n\n"
-                               "Please install matplotlib, seaborn, pandas, and jinja2.")
-
-    def generate_metrics_report(self):
-        """Generate a comprehensive HTML report with all visualizations"""
-        try:
-            from src.metrics_visualizer import MetricsVisualizer
-            import webbrowser
-            from pathlib import Path
-
-            self.status_var.set("Loading metrics data...")
-            metrics_vis = MetricsVisualizer()
-
-            if not metrics_vis.results:
-                messagebox.showerror("Error", "No evaluation results found. Run an evaluation first.")
-                self.status_var.set("Ready")
-                return
-
-            self.status_var.set("Generating comprehensive report...")
-            report_path = metrics_vis.generate_comprehensive_report()
-
-            if report_path and Path(report_path).exists():
-                self.status_var.set(f"Report generated: {report_path}")
-                if messagebox.askyesno("Report Generated", 
-                                       f"Report saved to:\n{report_path}\n\nOpen now?"):
-                    webbrowser.open(f"file://{report_path}")
-            else:
-                messagebox.showerror("Error", "Failed to generate report")
-                self.status_var.set("Report generation failed")
-
-        except ImportError:
-            messagebox.showerror("Error", "Required packages for report generation are not installed.\n\n"
-                               "Please install matplotlib, seaborn, pandas, and jinja2.")
-
-    def open_image_file(self, image_path):
-        """Open the image file with system default viewer"""
-        try:
-            import subprocess
-            # Use the default system application to open the image
-            if sys.platform == "win32":
-                os.startfile(image_path)
-            elif sys.platform == "darwin":
-                subprocess.run(["open", image_path])
-            else:
-                subprocess.run(["xdg-open", image_path])
-        except Exception as e:
-            print(f"Error opening image: {e}")
-            messagebox.showerror("Error", f"Failed to open image: {e}")
-
-    def open_file(self, file_path):
-        """Open any file with system default application"""
-        try:
-            import subprocess
-            # Use the default system application to open the file
             if sys.platform == "win32":
                 os.startfile(file_path)
-            elif sys.platform == "darwin":
-                subprocess.run(["open", file_path])
-            else:
-                subprocess.run(["xdg-open", file_path])
+            elif sys.platform == "darwin": # macOS
+                subprocess.run(["open", file_path], check=True)
+            else: # Linux and other Unix-like systems
+                subprocess.run(["xdg-open", file_path], check=True)
+            self.status_var.set(f"Opened file: {os.path.basename(file_path)}")
+        except FileNotFoundError:
+            messagebox.showerror("Error", f"File not found: {file_path}")
+            self.status_var.set(f"Error: File not found - {os.path.basename(file_path)}")
+        except subprocess.CalledProcessError as e:
+            messagebox.showerror("Error", f"Failed to open file with system viewer: {e}")
+            self.status_var.set(f"Error opening file: {os.path.basename(file_path)}")
         except Exception as e:
-            print(f"Error opening file: {e}")
-            messagebox.showerror("Error", f"Failed to open file: {e}")
-
-    def show_evaluation_results(self, results):
-        """Display evaluation results in the preview panel"""
-        # Clear canvas for fresh display
-        self.preview_canvas.delete("all")
-
-        canvas_width = self.preview_canvas.winfo_width() or 600 # Add default size
-        canvas_height = self.preview_canvas.winfo_height() or 400 # Add default size
-
-        # Create a sophisticated results display with metrics
-
-        # Add header
-        self.preview_canvas.create_text(
-            canvas_width / 2, 30,
-            text="Evaluation Results",
-            font=("Arial", 18, "bold"),
-            fill="#FFFFFF"
-        )
-
-        # Create model comparison table
-        y_position = 80
-        row_height = 30
-
-        # Define column widths and positions
-        col_widths = [120, 90, 90, 90, 90]
-        col_positions = []
-        current_x = 50
-        for width in col_widths:
-            col_positions.append(current_x)
-            current_x += width
-
-        # Draw header
-        headers = ["Model", "mAP", "AP@50", "AP@75", "FPS"]
-        for i, header in enumerate(headers):
-            self.preview_canvas.create_text(
-                col_positions[i] + col_widths[i] / 2, y_position,
-                text=header,
-                font=("Arial", 12, "bold"),
-                fill="#AACCFF"
-            )
-
-        y_position += row_height
-
-        # Store best values to highlight them
-        best_values = {
-            "mAP": 0,
-            "AP@50": 0,
-            "AP@75": 0,
-            "FPS": 0
-        }
-
-        # First pass to find best values
-        for model_type, metrics in results.items():
-            coco_metrics = metrics.get("coco_metrics", {})
-            fps = metrics.get("fps", 0)
-
-            if coco_metrics.get("AP_IoU=0.50:0.95", 0) > best_values["mAP"]:
-                best_values["mAP"] = coco_metrics.get("AP_IoU=0.50:0.95", 0)
-            if coco_metrics.get("AP_IoU=0.50", 0) > best_values["AP@50"]:
-                best_values["AP@50"] = coco_metrics.get("AP_IoU=0.50", 0)
-            if coco_metrics.get("AP_IoU=0.75", 0) > best_values["AP@75"]:
-                best_values["AP@75"] = coco_metrics.get("AP_IoU=0.75", 0)
-            if fps > best_values["FPS"]:
-                best_values["FPS"] = fps
-
-        # Draw model rows
-        for model_type, metrics in results.items():
-            coco_metrics = metrics.get("coco_metrics", {})
-            fps = metrics.get("fps", 0)
-
-            # Draw model name (first column)
-            self.preview_canvas.create_text(
-                col_positions[0] + col_widths[0] / 2, y_position,
-                text=model_type,
-                font=("Arial", 11, "bold"),
-                fill="#FFFFFF"
-            )
-
-            # Draw metrics values with conditional formatting
-            metric_values = [
-                coco_metrics.get("AP_IoU=0.50:0.95", 0),
-                coco_metrics.get("AP_IoU=0.50", 0),
-                coco_metrics.get("AP_IoU=0.75", 0),
-                fps
-            ]
-
-            for i, value in enumerate(metric_values):
-                text_color = "#FFFFFF"
-                if i == 3:  # FPS
-                    formatted_value = f"{value:.1f}"
-                    # Highlight if it's the best FPS
-                    if value >= best_values["FPS"] * 0.99:
-                        text_color = "#88FF88"
-                else:  # AP metrics
-                    formatted_value = f"{value:.3f}"
-                    # Highlight if it's the best AP value
-                    best_key = ["mAP", "AP@50", "AP@75"][i]
-                    if value >= best_values[best_key] * 0.99:
-                        text_color = "#88FF88"
-
-                self.preview_canvas.create_text(
-                    col_positions[i+1] + col_widths[i+1] / 2, y_position,
-                    text=formatted_value,
-                    font=("Arial", 11),
-                    fill=text_color
-                )
-
-            y_position += row_height
-
-        # Add a note about the metrics dashboard
-        note_y = y_position + 40
-        self.preview_canvas.create_text(
-            canvas_width / 2, note_y,
-            text="For more detailed metrics and visualizations,\nuse the 'Metrics' menu at the top.",
-            font=("Arial", 11),
-            fill="#AAAAAA",
-            justify=tk.CENTER
-        )
-
-        # Add button to open metrics dashboard
-        button_y = note_y + 50
-        button_width = 200
-        button_height = 30
-        button_x = canvas_width / 2 - button_width / 2
-
-        # Create button elements with a common tag
-        button_tag = "dashboard_button"
-        button_area = self.preview_canvas.create_rectangle(
-            button_x, button_y,
-            button_x + button_width, button_y + button_height,
-            fill="#2C5AA0", outline="#4477BB",
-            tags=button_tag
-        )
-        dashboard_text = self.preview_canvas.create_text(
-            canvas_width / 2, button_y + button_height / 2,
-            text="Open Metrics Dashboard",
-            font=("Arial", 11, "bold"),
-            fill="#FFFFFF",
-            tags=button_tag
-        )
-
-        # Add click feedback and action using the tag
-        def on_button_click(event):
-            self.preview_canvas.itemconfig(button_area, fill="#1B3E70") # Use button_area reference
-            self.preview_canvas.after(100, lambda: self.preview_canvas.itemconfig(button_area, fill="#2C5AA0")) # Use button_area reference
-            self.show_metrics_dashboard()
-
-        self.preview_canvas.tag_bind(button_tag, "<Button-1>", on_button_click) # Bind the tag
-
-    def run_best_model_on_test(self):
-        """Run the best model on a test video based on evaluation results"""
-        try:
-            # Import the pipeline module for best model determination
-            from src.pipeline import determine_best_model
-            from src.metrics_visualizer import MetricsVisualizer
-            import random
-            from pathlib import Path
-
-            self.status_var.set("Finding best model from evaluation results...")
-
-            # Load the latest evaluation results
-            metrics_vis = MetricsVisualizer()
-            if not metrics_vis.results:
-                messagebox.showerror("Error", "No evaluation results found. Run an evaluation first.")
-                self.status_var.set("Ready")
-                return
-
-            # Determine the best model using the pipeline's logic
-            best_model, scoring_details = determine_best_model(metrics_vis.results)
-
-            if best_model:
-                # Get sample videos
-                sample_videos_dir = Path("data_sets/video_data/samples")
-                if not sample_videos_dir.exists():
-                    messagebox.showerror(
-                        "No Sample Videos",
-                        "Sample videos directory not found. Please ensure the data_sets/video_data/samples directory exists."
-                    )
-                    return
-
-                video_files = list(sample_videos_dir.glob("*.mp4"))
-                if not video_files:
-                    messagebox.showerror(
-                        "No Sample Videos",
-                        "No sample videos found in the data_sets/video_data/samples directory."
-                    )
-                    return
-
-                # Select an appropriate test video based on the model
-                # For real applications, you'd match videos to model capabilities
-                if best_model == "mask-rcnn":
-                    # Mask R-CNN is good for general segmentation tasks
-                    keyword_preferences = ["detection", "car", "person", "people"]
-                elif best_model == "yolo-seg":
-                    # YOLO-Seg is good for segmentation tasks
-                    keyword_preferences = ["person", "fruit", "detection"]
-                else:
-                    # Default for any other model
-                    keyword_preferences = ["person", "detection"]
-
-                # Try to find a video that matches keywords
-                selected_video = None
-                for keyword in keyword_preferences:
-                    for video in video_files:
-                        if keyword.lower() in video.name.lower():
-                            selected_video = video
-                            break
-                    if selected_video:
-                        break
-
-                # If no preference match,
-                    selected_video = random.choice(video_files)
-
-                if not selected_video:
-                    messagebox.showerror(
-                        "No Suitable Video",
-                        "Could not find a suitable test video for the best model."
-                    )
-                    return
-
-                # Show which model was determined to be best
-                messagebox.showinfo(
-                    "Best Model Determined",
-                    f"The best performing model is: {best_model}\n\n"
-                    f"Running this model on test video:\n{selected_video.name}"
-                )
-
-                # Get model path from default models
-                from models import DEFAULT_MODELS
-                model_path = DEFAULT_MODELS.get(best_model)
-                if not model_path or not Path(model_path).exists():
-                    messagebox.showerror(
-                        "Model Not Found",
-                        f"Could not find the model file for {best_model}."
-                    )
-                    return
-
-                # Initialize the model
-                self.status_var.set(f"Initializing {best_model} model...")
-                from models import ModelManager
-                model_manager = ModelManager(best_model, model_path)
-
-                # Process the video
-                self.status_var.set(f"Processing {selected_video.name} with {best_model}...")
-                self.processing_active = True
-                self._update_buttons(True)
-
-                # Create output directory if it doesn't exist
-                output_dir = Path("inference/output_videos")
-                output_dir.mkdir(parents=True, exist_ok=True)
-
-                # Create output filename
-                video_base = selected_video.stem
-                output_path = output_dir / f"{video_base}_{best_model}_demo.mp4"
-
-                # Process the video and save output
-                from inference.create_demo_video import create_demo_video
-                output_video_path = create_demo_video(best_model, str(selected_video), str(output_path))
-
-                if output_video_path and Path(output_video_path).exists():
-                    # Show success message and offer to play the video
-                    play_video = messagebox.askyesno(
-                        "Processing Complete",
-                        f"The best model ({best_model}) has been run on {selected_video.name}.\n\n"
-                        f"Output saved to {output_video_path}.\n\n"
-                        "Would you like to play the output video now?"
-                    )
-                    if play_video:
-                        self.play_video_in_preview(output_video_path)
-                else:
-                    messagebox.showerror(
-                        "Processing Failed",
-                        "Failed to create the demo video with the best model."
-                    )
-            else:
-                messagebox.showerror(
-                    "Best Model Determination Failed",
-                    "Could not determine the best model from evaluation results."
-                )
-
-        except Exception as e:
-            import traceback
             traceback.print_exc()
-            messagebox.showerror(
-                "Error",
-                f"An error occurred while running the best model: {str(e)}"
-            )
-        finally:
-            self.status_var.set("Ready")
-            self._update_buttons(False)
+            messagebox.showerror("Error", f"An unexpected error occurred while trying to open the file:\n{e}")
+            self.status_var.set(f"Error opening file: {os.path.basename(file_path)}")
+            
+    def run_best_model_on_test(self):
+        """
+        Generate a demo video using the selected model and video.
+        """
+        selected_model = self._get_selected_model_for_processing()
+        if not selected_model:
+            messagebox.showerror("Error", "No model selected. Please select a model.")
+            return
+            
+        selected_video = self._get_selected_video_path()
+        if not selected_video or not selected_video.exists():
+            messagebox.showerror("Error", "No video selected or video file not found. Please select a valid video.")
+            return
 
+        self.status_var.set(f"Generating video with {selected_model} on {selected_video.name}...")
+        self._display_operation_status_on_canvas("Preparing...", f"Using model: {selected_model}\nVideo: {selected_video.name}")
+
+        def video_generation_task():
+            try:
+                from src.create_demo_video import create_demo_video
+
+                def progress_callback_for_video(frame, current_frame, total_frames, model_type, progress=0.0):
+                    self.root.after(0, self._display_video_generation_progress, current_frame, total_frames, progress, model_type)
+
+                output_video_path = OUTPUT_DIR / f"{selected_video.stem}_{selected_model}_demo.mp4"
+                final_output_path = create_demo_video(
+                    model_name=selected_model,
+                    video_path=selected_video,
+                    output_path=output_video_path,
+                    conf_threshold=0.3,
+                    iou_threshold=0.5,
+                    device=self.gpu_var.get() if self.gpu_var.get() != "auto" else None,
+                    progress_callback=progress_callback_for_video
+                )
+
+                if final_output_path:
+                    success_message = f"Video generated: {Path(final_output_path).name}"
+                    self.status_var.set(success_message)
+                    self.root.after(0, self._display_operation_status_on_canvas, "Success!", success_message + f"\nSaved to: {final_output_path}")
+                    messagebox.showinfo("Success", f"Demo video created successfully!\nSaved to: {final_output_path}")
+                else:
+                    error_message = "Video generation failed. Check logs."
+                    self.status_var.set(error_message)
+                    self.root.after(0, self._display_message_on_canvas, "Error: Video Generation Failed")
+                    messagebox.showerror("Error", error_message)
+
+            except Exception as e:
+                error_message = f"Error during video generation: {e}"
+                print(traceback.format_exc())
+                self.status_var.set(error_message)
+                self.root.after(0, self._display_message_on_canvas, f"Error: {e}")
+                messagebox.showerror("Video Generation Error", error_message)
+
+        threading.Thread(target=video_generation_task, daemon=True).start()
+
+    def generate_demo_video_with_selection(self):
+        """
+        Generate a demo video using the selected model and video.
+        This method is a wrapper for run_best_model_on_test to be used in the menu.
+        """
+        self.run_best_model_on_test()
+        
     def delete_datasets_gui(self):
         """Show confirmation dialog and delete all datasets"""
         confirm = messagebox.askyesno(
@@ -2879,7 +2567,7 @@ class GraphicalGUI:
             )
             self.status_var.set(f"Error deleting generated data: {str(e)}")
 
-    def _show_evaluation_progress(self, message, progress_percent):
+    def _display_evaluation_progress_update(self, message, progress_percent):
         """Show evaluation progress in the preview panel"""
         canvas_width = self.preview_canvas.winfo_width() or 600
         canvas_height = self.preview_canvas.winfo_height() or 400
@@ -2935,9 +2623,83 @@ class GraphicalGUI:
         # Force update
         self.preview_canvas.update()
 
+    def _display_final_evaluation_results(self, results):
+        """Display the final evaluation results on the canvas, typically as a table."""
+        self.preview_canvas.delete("all")
+        canvas_width = self.preview_canvas.winfo_width() or 600
+        canvas_height = self.preview_canvas.winfo_height() or 400
+
+        self.preview_canvas.create_text(
+            canvas_width // 2, 30,
+            text="Model Evaluation Results",
+            font=("Arial", 16, "bold"),
+            fill="white"
+        )
+
+        if not results:
+            self.preview_canvas.create_text(
+                canvas_width // 2, canvas_height // 2,
+                text="No evaluation results to display.",
+                font=("Arial", 12),
+                fill="white"
+            )
+            return
+
+        # Convert results to a pandas DataFrame for easier display
+        try:
+            df = pd.DataFrame(results)
+            # Basic formatting for the table display
+            # For a more complex table, you might need a dedicated table widget or draw it manually
+            # This is a simplified text representation
+            y_offset = 70
+            col_width = canvas_width // (len(df.columns) + 1) 
+            header_font = ("Arial", 10, "bold")
+            cell_font = ("Arial", 9)
+
+            # Display headers
+            for i, col_name in enumerate(df.columns):
+                self.preview_canvas.create_text(
+                    (i + 0.5) * col_width, y_offset,
+                    text=str(col_name),
+                    font=header_font,
+                    fill="white",
+                    anchor="n"
+                )
+            y_offset += 20
+
+            # Display data rows
+            for row_idx, row in df.iterrows():
+                for i, value in enumerate(row):
+                    text_value = f"{value:.3f}" if isinstance(value, float) else str(value)
+                    self.preview_canvas.create_text(
+                        (i + 0.5) * col_width, y_offset,
+                        text=text_value,
+                        font=cell_font,
+                        fill="white",
+                        anchor="n"
+                    )
+                y_offset += 18 # Spacing for next row
+                if y_offset > canvas_height - 30: # Avoid drawing off-canvas
+                    self.preview_canvas.create_text(
+                        canvas_width // 2, y_offset + 10,
+                        text="... (more results available in logs/files)",
+                        font=("Arial", 8, "italic"),
+                        fill="lightgrey",
+                        anchor="n"
+                    )
+                    break
+        except Exception as e:
+            self.preview_canvas.create_text(
+                canvas_width // 2, canvas_height // 2,
+                text=f"Error displaying results: {e}",
+                font=("Arial", 10),
+                fill="red"
+            )
+        self.preview_canvas.update()
+
     def _update_evaluation_progress(self, progress_percent, message):
         """Update the evaluation progress display"""
-        self._show_evaluation_progress(message, progress_percent)
+        self._display_evaluation_progress_update(message, progress_percent) # Changed to call renamed method
         self.status_var.set(f"Evaluating models: {progress_percent:.1f}%")
 
     def run_evaluation_gui(self):
@@ -2949,7 +2711,7 @@ class GraphicalGUI:
         no_vis = messagebox.askyesno("Visualizations", "Skip saving visualizations? (Yes to skip)")
 
         # Show initial progress display
-        self._show_evaluation_progress("Starting evaluation...", 0)
+        self._display_evaluation_progress_update("Starting evaluation...", 0) # Changed to call renamed method
         self.status_var.set(f"Evaluating models on {num} images...")
         self.root.update()
 
@@ -2978,7 +2740,7 @@ class GraphicalGUI:
                 results = evaluator.results # Capture results
 
                 # Display final results in the GUI
-                self.root.after(0, self.show_evaluation_results, results)
+                self.root.after(0, self._display_final_evaluation_results, results) # Changed to call new method
                 messagebox.showinfo("Evaluation Complete", 
                                     "Model evaluation finished.\nResults are displayed in the preview panel.\n"
                                     "Detailed reports and charts saved in the 'inference/results' folder.")
@@ -3140,6 +2902,130 @@ class GraphicalGUI:
         if len(filename) > max_length:
             filename = filename[:max_length-3] + "..."
         return filename
+
+    def _display_operation_status_on_canvas(self, title, message):
+        """Displays a general status message on the preview canvas."""
+        self.preview_canvas.delete("all")
+        # Get the actual canvas dimensions (with fallbacks if not yet rendered)
+        canvas_width = self.preview_canvas.winfo_width() or 600
+        canvas_height = self.preview_canvas.winfo_height() or 400
+
+        self.preview_canvas.create_text(
+            canvas_width // 2, canvas_height // 2 - 30,  # Adjusted y for title
+            text=title,
+            font=("Arial", 16, "bold"),
+            fill="white",
+            anchor=tk.CENTER
+        )
+        self.preview_canvas.create_text(
+            canvas_width // 2, canvas_height // 2 + 10,  # Adjusted y for message
+            text=message,
+            font=("Arial", 12),
+            fill="white",
+            justify=tk.CENTER,
+            anchor=tk.CENTER,
+            width=canvas_width * 0.8 # Wrap text
+        )
+        self.preview_canvas.update() # Force update to show message immediately
+
+    def _display_video_generation_progress(self, current_frame, total_frames, progress_percentage, model_name):
+        """Displays video generation progress on the preview canvas."""
+        self.preview_canvas.delete("all")
+        width = self.preview_canvas.winfo_width() or 600
+        height = self.preview_canvas.winfo_height() or 400
+
+        # Title
+        title_text = f"Generating Video with {model_name}"
+        self.preview_canvas.create_text(
+            width // 2, height // 2 - 60,
+            text=title_text, fill="white", font=("Arial", 16, "bold"), justify=tk.CENTER
+        )
+
+        # Progress Text (e.g., "Frame 100/1000 (10%)")
+        progress_text = f"Frame {current_frame}/{total_frames} ({progress_percentage:.1f}%)"
+        self.preview_canvas.create_text(
+            width // 2, height // 2 - 20,
+            text=progress_text, fill="lightgray", font=("Arial", 12), justify=tk.CENTER
+        )
+
+        # Progress Bar
+        bar_width = max(200, width * 0.6) # Ensure minimum width
+        bar_height = 20
+        bar_x = (width - bar_width) // 2
+        bar_y = height // 2 + 10
+
+        # Background of the progress bar
+        self.preview_canvas.create_rectangle(
+            bar_x, bar_y, bar_x + bar_width, bar_y + bar_height,
+            outline="gray", fill="#333333"
+        )
+        # Filled part of the progress bar
+        fill_width = (progress_percentage / 100) * bar_width
+        self.preview_canvas.create_rectangle(
+            bar_x, bar_y, bar_x + fill_width, bar_y + bar_height,
+            outline="#4CAF50", fill="#4CAF50" # Green progress
+        )
+        self.preview_canvas.create_text(
+            width // 2, bar_y + bar_height // 2,
+            text=f"{progress_percentage:.1f}%", fill="white", font=("Arial", 10, "bold")
+        )
+
+    def _update_evaluation_progress(self, progress_percent, message):
+        """Update the evaluation progress display"""
+        self._display_evaluation_progress_update(message, progress_percent) # Changed to call renamed method
+        self.status_var.set(f"Evaluating models: {progress_percent:.1f}%")
+
+    def run_evaluation_gui(self):
+        """Prompt for evaluation parameters and run evaluation in background"""
+        # Ask for number of images
+        num = simpledialog.askinteger("Run Evaluation", f"Number of images (1-{COCO_VAL_TOTAL_IMAGES}):", minvalue=1, maxvalue=COCO_VAL_TOTAL_IMAGES)
+        if not num:
+            return
+        no_vis = messagebox.askyesno("Visualizations", "Skip saving visualizations? (Yes to skip)")
+
+        # Show initial progress display
+        self._display_evaluation_progress_update("Starting evaluation...", 0) # Changed to call renamed method
+        self.status_var.set(f"Evaluating models on {num} images...")
+        self.root.update()
+
+        # Run evaluation in a thread
+        def eval_task():
+            try:
+                # --- Progress Callback Definition ---
+                def update_progress_display(model_type, current_image, total_images):
+                    """Callback function to update the preview canvas during evaluation."""
+                    progress_percent = (current_image / total_images) * 100 if total_images > 0 else 0
+                    message = f"Evaluating: {model_type.upper()}\nImage {current_image} of {total_images}"
+                    # Update progress in main thread
+                    self.root.after(0, lambda p=progress_percent, m=message: 
+                                  self._update_evaluation_progress(p, m))
+
+                # --- End Progress Callback Definition ---
+
+                evaluator = ModelEvaluator()
+
+                # Pass the callback function to run_evaluation
+                evaluator.run_evaluation(
+                    max_images=num, 
+                    save_visualizations=not no_vis, 
+                    progress_callback=update_progress_display 
+                )
+                results = evaluator.results # Capture results
+
+                # Display final results in the GUI
+                self.root.after(0, self._display_final_evaluation_results, results) # Changed to call new method
+                messagebox.showinfo("Evaluation Complete", 
+                                    "Model evaluation finished.\nResults are displayed in the preview panel.\n"
+                                    "Detailed reports and charts saved in the 'inference/results' folder.")
+            except Exception as e:
+                print(f"Error during evaluation: {e}")
+                traceback.print_exc()
+                messagebox.showerror("Evaluation Error", f"An error occurred during evaluation:\n{e}")
+                self.show_preview_message(f"Evaluation failed.\nError: {e}") # Show error in preview
+            finally:
+                self.status_var.set("Ready") # Reset status bar
+
+        threading.Thread(target=eval_task, daemon=True).start()
 
 def main():
     """

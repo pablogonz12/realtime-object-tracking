@@ -111,11 +111,11 @@ def process_video_with_model(
                 break
                 
             frame_count += 1
+            current_progress_percentage = (frame_count / total_frames * 100) if total_frames > 0 else 0
             
-            # Update progress if callback provided
+            # Update progress if callback provided (general progress update)
             if callback and frame_count % 5 == 0:  # Update every 5 frames
-                progress = (frame_count / total_frames * 100) if total_frames > 0 else 0
-                callback(None, frame_count, total_frames, model_manager.model_type, progress=progress)
+                callback(None, frame_count, total_frames, model_manager.model_type, progress=current_progress_percentage)
             
             try:
                 # Process frame based on model type
@@ -165,7 +165,8 @@ def process_video_with_model(
                     
                     # Update via callback
                     if callback:
-                        callback(annotated_frame, frame_count, total_frames, model_manager.model_type)
+                        # current_progress_percentage is already calculated above
+                        callback(annotated_frame, frame_count, total_frames, model_manager.model_type, progress=current_progress_percentage)
                 else:
                     # Handle invalid results
                     msg = "Model returned unexpected results format"
@@ -178,7 +179,8 @@ def process_video_with_model(
                         out.write(annotated_frame)
                     
                     if callback:
-                        callback(annotated_frame, frame_count, total_frames, model_manager.model_type)
+                        # current_progress_percentage is already calculated above
+                        callback(annotated_frame, frame_count, total_frames, model_manager.model_type, progress=current_progress_percentage)
                         
             except Exception as e:
                 processing_errors += 1
@@ -195,7 +197,8 @@ def process_video_with_model(
                     out.write(error_frame)
                     
                 if callback:
-                    callback(error_frame, frame_count, total_frames, model_manager.model_type)
+                    # current_progress_percentage is already calculated above
+                    callback(error_frame, frame_count, total_frames, model_manager.model_type, progress=current_progress_percentage)
             
             # Small delay for UI updates if needed
             time.sleep(0.01)

@@ -12,6 +12,8 @@ import time
 import json
 from pathlib import Path
 import argparse
+import torch  # Add import for torch to fix NameError
+from datetime import datetime  # Add datetime import
 
 # Add the parent directory to sys.path for proper imports
 current_dir = Path(__file__).resolve().parent
@@ -146,7 +148,8 @@ def create_demo_video(
     conf_threshold=0.25,
     iou_threshold=0.45,
     device=None,
-    show_progress=True
+    show_progress=True, # This existing arg controls terminal progress, not GUI callback
+    progress_callback=None # New argument for GUI progress updates
 ):
     """
     Create a demo video with object detection and segmentation.
@@ -158,21 +161,26 @@ def create_demo_video(
         conf_threshold: Confidence threshold for detections
         iou_threshold: IoU threshold for NMS
         device: Device to use for inference (cuda, cpu, mps)
-        show_progress: Whether to show progress bar
-        
+        show_progress: Whether to show progress bar in terminal (legacy)
+        progress_callback: Callback function for GUI progress updates.
+                           Expected signature: callback(frame, current_frame, total_frames, model_type, progress)
+                           'progress' is the percentage (0-100).
+                           'frame' can be None for progress-only updates.
+                           
     Returns:
         Path to the output video
     """
     try:
-        # Validate inputs
-        manager = ModelManager()
-        available_models = manager.get_available_models()
-        
-        model_name = validate_model_name(model_name, available_models)
+        # Validate model_name against default supported models
+        from models import DEFAULT_MODEL_PATHS
+        valid_models = list(DEFAULT_MODEL_PATHS.keys())
+        model_name = validate_model_name(model_name, valid_models)
+        # Initialize manager
+        manager = ModelManager(model_type=model_name, conf_threshold=conf_threshold, iou_threshold=iou_threshold)
         
         if video_path is None:
             # List available samples if no video provided
-            samples = list(VIDEO_SAMPLES_DIR.glob("*.mp4"))
+            samples = list(VIDEO_DIR.glob("*.mp4"))
             if not samples:
                 raise InvalidInputError(
                     "No sample videos found and no video path provided. "
@@ -182,8 +190,6 @@ def create_demo_video(
             log_info(f"No video path provided. Using sample: {video_path}")
         
         video_path = validate_video(video_path)
-        conf_threshold = validate_confidence_threshold(conf_threshold)
-        iou_threshold = validate_iou_threshold(iou_threshold)
         
         # Set default device if not provided
         if device is None:
@@ -200,20 +206,19 @@ def create_demo_video(
             # Create parent directory if it doesn't exist
             Path(output_path).parent.mkdir(exist_ok=True, parents=True)
         
-        # Load model
-        log_info(f"Loading model: {model_name}")
-        model = manager.load_model(model_name, device=device)
+        # Use the model directly from the model manager rather than trying to load it
+        log_info(f"Using model: {model_name}")
+        # The model is already loaded in the manager during initialization
+        # No need to call manager.load_model
         
-        # Process video
+        # Process video and generate output
         log_info(f"Processing video: {video_path}")
-        cap, width, height, fps, frame_count = load_video(video_path)
-        
-        # Generate the output video with detections
-        output_path, stats = process_video_with_detections(
-            cap, model, manager, output_path,
-            conf_threshold=conf_threshold,
-            iou_threshold=iou_threshold,
-            show_progress=show_progress
+        stats = process_video_with_model(
+            video_path,
+            manager,
+            output_path=output_path,
+            add_fps=show_progress, # This controls FPS overlay on video frames
+            callback=progress_callback # Pass the new callback here
         )
         
         # Save performance summary
@@ -393,10 +398,13 @@ def main():
     
     # Create the demo video
     output_path = create_demo_video(
-        model_type, 
-        video_path, 
-        args.output, 
-        args.model_path,
+        model_name=model_type, 
+        video_path=video_path, 
+        output_path=args.output, 
+        # args.model_path is not a direct parameter of create_demo_video
+        # and was causing the conflict.
+        # If custom model path is needed, create_demo_video or ModelManager
+        # would need to be adapted to use args.model_path.
         conf_threshold=args.conf_threshold,
         iou_threshold=args.iou_threshold
     )
