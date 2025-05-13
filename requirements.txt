@@ -8,20 +8,32 @@ torch==2.7.0
 torchvision==0.22.0
 torchaudio==2.7.0
 ultralytics==8.3.130
-
-
+ultralytics-thop==2.0.14 # For model profiling
 
 # OpenCV for image/video processing
 opencv-python==4.11.0.86
 
-# DINO-Seg dependencies
+# DINO-Seg and other Transformer-based model dependencies
 transformers==4.51.3
 timm==1.0.15
-huggingface_hub==0.31.1
+huggingface-hub==0.31.1 # Corrected name
 
-# Other common dependencies
+# Core data handling and numerical libraries
 numpy==2.2.5
-Pillow==11.2.1
-requests==2.32.3
-ttkthemes==3.2.2
-pycocotools==2.0.6
+scipy==1.15.3
+pandas==2.2.3
+
+# Image processing and utilities
+Pillow==11.2.1 # Corrected case
+pycocotools==2.0.8 # COCO API for evaluation
+
+# Plotting and Visualization
+matplotlib==3.10.3
+seaborn==0.13.2
+
+# Utilities
+requests==2.32.3 # For downloading models/data
+PyYAML==6.0.2 # For configuration files
+tqdm==4.67.1 # Progress bars
+psutil==7.0.0 # System utilities, e.g. for monitoring by ultralytics
+ttkthemes==3.2.2 # Theming for Tkinter GUI (if used)
