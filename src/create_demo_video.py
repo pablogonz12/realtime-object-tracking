@@ -135,7 +135,7 @@ from src.error_handling import (
 
 # Configure paths
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-VIDEO_DIR = PROJECT_ROOT / "data_sets" / "video_data" / "samples"
+VIDEO_DIR = PROJECT_ROOT / "data_sets" / "video_data" # Removed "samples"
 OUTPUT_DIR = PROJECT_ROOT / "inference" / "output_videos"
 RESULTS_DIR = PROJECT_ROOT / "inference" / "results"
 OUTPUT_DIR.mkdir(exist_ok=True, parents=True)

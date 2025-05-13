@@ -67,8 +67,6 @@ python src/generate_dashboard.py --show
 # Step 4: Create demo video with best model
 python src/create_demo_video.py --best-model
 
-# Step 5: Print summary table to console
-python src/print_model_summary.py
 ```
 
 **Expected Outputs from Pipeline:**
@@ -84,8 +82,6 @@ python src/print_model_summary.py
 4. **Step 4**:
    - Demo video processed with best-performing model
    - Output saved to `inference/output_videos/[video_name]_[best_model]_demo.mp4`
-5. **Step 5**:
-   - Text table with model metrics printed to console
 
 The best performing model will be automatically selected based on the evaluation results.
 

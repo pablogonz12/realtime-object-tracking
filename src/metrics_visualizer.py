@@ -331,7 +331,7 @@ class MetricsVisualizer:
         self.data['max_detection_value'] = max_detection_value * 1.15 if max_detection_value > 0 else 10
 
 
-    def create_metrics_dashboard(self, show_plot=False):
+    def create_metrics_dashboard(self, show_plot=False, output_path=None, dpi=150, file_format='png'):
         """
         Creates the comprehensive multi-plot dashboard visualization.
         This function orchestrates the creation of all subplots.
@@ -339,6 +339,10 @@ class MetricsVisualizer:
         Args:
             show_plot (bool): If True, display the plot interactively using plt.show().
                               If False, only save the plot to a file.
+            output_path (str or Path, optional): Full path to save the dashboard image.
+                                                 If None, a default path is generated.
+            dpi (int, optional): Dots per inch for the saved image.
+            file_format (str, optional): Format of the saved image (e.g., 'png', 'jpg', 'svg').
 
         Returns:
             str: Absolute path to the saved dashboard image file, or None if generation failed.
@@ -400,21 +404,27 @@ class MetricsVisualizer:
                      fontsize=20, y=0.985) # Adjusted size and position
 
         # --- Save and/or Show the Figure ---
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        output_filename = f"metrics_dashboard_{timestamp}.png"
-        output_path = VISUALIZATIONS_DIR / output_filename
+        if output_path is None:
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            output_filename = f"metrics_dashboard_{timestamp}.{file_format}"
+            save_to_path = VISUALIZATIONS_DIR / output_filename
+        else:
+            save_to_path = Path(output_path)
+            # Ensure the output directory exists
+            save_to_path.parent.mkdir(parents=True, exist_ok=True)
+
 
         try:
             # Save the figure to the visualizations directory
-            plt.savefig(output_path, dpi=150, bbox_inches='tight', facecolor='white')
-            print(f"Metrics dashboard saved successfully to: {output_path}")
+            plt.savefig(save_to_path, dpi=dpi, bbox_inches='tight', facecolor='white', format=file_format)
+            print(f"Metrics dashboard saved successfully to: {save_to_path}")
 
             if show_plot:
                 plt.show() # Display the plot window
             else:
                 plt.close(fig) # Close the figure object if not showing interactively
 
-            return str(output_path.resolve()) # Return the absolute path
+            return str(save_to_path.resolve()) # Return the absolute path
 
         except Exception as e:
             print(f"Error saving or showing the plot: {e}")
