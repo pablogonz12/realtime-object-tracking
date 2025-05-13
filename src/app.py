@@ -1237,9 +1237,9 @@ class GraphicalGUI:
         threading.Thread(target=compress_thread, daemon=True).start()
 
     def get_available_videos(self):
-        """Get list of available video samples"""
-        video_dir = Path("data_sets/video_data/samples")
-        default_video = "data_sets/video_data/samples/people-detection.mp4" # Define default
+        """Get list of available video samples"""        
+        video_dir = Path("data_sets/video_data/")
+        default_video = "data_sets/video_data/people-detection.mp4" # Define default
         if not video_dir.is_dir(): # Check if it's a directory
             print(f"Warning: Video directory not found: {video_dir}")
             # Create the directory if it doesn't exist? Or just return default?
@@ -1404,7 +1404,7 @@ class GraphicalGUI:
 
     def get_sample_videos(self):
         """Get list of available sample videos with clean display names"""
-        sample_dir = Path("data_sets/video_data/samples")
+        sample_dir = Path("data_sets/video_data/")
         if not sample_dir.is_dir():
             print(f"Warning: Sample directory not found: {sample_dir}")
             return []

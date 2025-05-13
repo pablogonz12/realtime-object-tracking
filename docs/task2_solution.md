@@ -9,8 +9,14 @@ This project addresses Task #2 "Recognizing Objects in Video Sequences" by:
 ## Key Deliverables
 1. **Source Code**: Complete implementation of all components described in this README
 2. **Detailed Analysis Report** (`REPORT.md`): Comprehensive qualitative and quantitative analysis of model performance
-3. **Demo Videos**: Processed videos demonstrating object recognition capabilities
+3. **Demo Videos**: Processed videos demonstrating object recognition capabilities.
+    - Example video showcasing the best performing model (YOLOv9e) on `people-detection.mp4`: [https://youtu.be/_EG8Y22zYec](https://youtu.be/_EG8Y22zYec)
+
+    [![Watch the video](https://img.youtube.com/vi/_EG8Y22zYec/0.jpg)](https://www.youtube.com/watch?v=_EG8Y22zYec)
+
 4. **Evaluation Results**: JSON files containing raw metrics and comparisons
+5. **Metrics Dashboard Example**:
+    ![Metrics Dashboard Example](metrics_dashboard_example.png)
 
 The **detailed analysis report** (`REPORT.md`) is a critical deliverable that contains:
 - In-depth comparison of model architectures
