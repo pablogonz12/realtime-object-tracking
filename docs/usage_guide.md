@@ -81,7 +81,7 @@ python src/create_demo_video.py --video data_sets/video_data/people-detection.mp
 
 **Runnable Example (specific model, video, and output):**
 ```bash
-python src/create_demo_video.py --model yolov8s-seg --video data_sets/video_data/sample_video.mp4 --output inference/output_videos/sample_video_yolov8s_demo.mp4 --conf-threshold 0.3
+python src/create_demo_video.py --model yolov9e-seg --video data_sets/video_data/people-detection.mp4 --output inference/output_videos/sample_video_yolov9e_demo.mp4 --conf-threshold 0.3
 ```
 
 **Expected Output:**
